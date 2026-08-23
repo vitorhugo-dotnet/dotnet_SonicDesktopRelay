@@ -120,7 +120,14 @@ A direção de dependência é sempre para dentro: `App` → `Presentation` → 
 `App`; nenhum view model conhece WGC, FFmpeg ou WASAPI. Isso é o que permite testar a
 apresentação inteira sem uma placa de vídeo.
 
-`Media.Windows` usa TFM `net10.0-windows10.0.19041.0`; todo o resto usa `net10.0`.
+`Media.Windows` **e** `App` usam TFM `net10.0-windows10.0.19041.0`; todas as bibliotecas —
+`Core`, `ApiClient`, `Signaling`, `Media`, `Rtc`, `Presentation` — usam `net10.0`.
+
+O `App` não tem escolha: ele compõe `Media.Windows`, e um projeto `net10.0` não pode
+referenciar um `net10.0-windows` (NU1201). A alternativa seria carregar os adaptadores por
+reflexão para preservar a regra na letra, ao custo de um composition root que ninguém
+consegue testar. O que a regra realmente protege é a testabilidade das camadas de baixo, e
+essa continua intacta: nenhuma biblioteca abaixo do shell conhece Windows.
 
 ### Identidade
 
