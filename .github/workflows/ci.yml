@@ -198,7 +198,13 @@ jobs:
 
           $displayVersion = if ($tagName.StartsWith('v')) { $tagName.Substring(1) } else { "0.0.$runNumber" }
           $assetVersion = $displayVersion -replace '[^0-9A-Za-z.-]', '-'
-          $isPrerelease = if ($displayVersion -match '-' -or -not $tagName.StartsWith('v')) { 'true' } else { 'false' }
+
+          # Only a version that names itself pre-release (an alpha, an rc) is one. A marker
+          # build of main is deliberately NOT: it has to be a full release to become the
+          # repository's "Latest", and being the current version is the entire point of a
+          # marker. GitHub refuses "latest" and "prerelease" together — the 422 that taught
+          # us this reads "Latest release cannot be draft or prerelease".
+          $isPrerelease = if ($displayVersion -match '-') { 'true' } else { 'false' }
 
           "tag_name=$tagName" >> $env:GITHUB_OUTPUT
           "display_version=$displayVersion" >> $env:GITHUB_OUTPUT
@@ -314,13 +320,16 @@ jobs:
               Select-Object -ExpandProperty FullName
           )
 
-          # --latest is what makes the newest marker tag the release people actually land on.
-          # Without it a dev-N release is created as a prerelease and GitHub keeps pointing
-          # "Latest" at some older v* tag, so the freshest build stays invisible.
-          $extraArguments = @('--target', '${{ github.sha }}', '--notes-file', $notesPath, '--latest')
+          $extraArguments = @('--target', '${{ github.sha }}', '--notes-file', $notesPath)
 
           if ('${{ steps.metadata.outputs.is_prerelease }}' -eq 'true') {
+            # A pre-release never becomes "Latest"; the two are mutually exclusive to GitHub.
             $extraArguments += '--prerelease'
+          } else {
+            # This is what makes the newest marker tag the release people actually land on.
+            # Left off, "Latest" stays pinned to whatever older tag happened to hold it and
+            # the freshest build is invisible on the repository's front page.
+            $extraArguments += '--latest'
           }
 
           # Retries transient GitHub API 5xx responses instead of failing a build whose
