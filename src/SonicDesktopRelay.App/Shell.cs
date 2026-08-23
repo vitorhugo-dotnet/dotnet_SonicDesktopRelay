@@ -231,9 +231,30 @@ public sealed class Shell : INotifyPropertyChanged
     /// <summary>
     /// Called from the decode thread. Rendering is the UI thread's job and decoding must not
     /// be, so this is the single hand-off point between them.
+    /// <para>
+    /// Blocking (<c>Invoke</c>, not <c>Post</c>) on purpose. The frame's pixels are the
+    /// decoder's own reused buffer — the whole point of not allocating one per frame — so
+    /// posting would let the decode thread scribble the next frame over it before the UI
+    /// thread had blitted this one, and the picture would tear under exactly the load that
+    /// makes it hardest to diagnose. Waiting here costs one memcpy of decode throughput and
+    /// applies backpressure to the receive side, which is the right thing to give up.
+    /// </para>
     /// </summary>
-    internal void PublishFrame(VideoFrame frame) =>
-        Dispatcher.UIThread.Post(() => FrameDecoded?.Invoke(frame));
+    internal void PublishFrame(VideoFrame frame)
+    {
+        if (FrameDecoded is null) return;
+
+        try
+        {
+            Dispatcher.UIThread.Invoke(() => FrameDecoded?.Invoke(frame));
+        }
+        catch (Exception e) when (e is InvalidOperationException or TaskCanceledException
+                                      or OperationCanceledException)
+        {
+            // The dispatcher is shutting down: the window is closing and there is nothing left
+            // to draw on. A frame in flight at that moment is not a failure.
+        }
+    }
 
     // Snapshots arrive on whatever thread the signaling receive loop is running on; bindings
     // and the observable collection are the UI thread's alone.

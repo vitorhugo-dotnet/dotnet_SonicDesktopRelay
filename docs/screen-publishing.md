@@ -259,6 +259,12 @@ Three buffers exist, all reused and rebuilt only when the picture size changes:
 - the surface's **`WriteableBitmap`**, recreated only when the frame size differs from the
   current one.
 
+Because the decoder's output buffer is reused, the hand-off to the UI thread is
+`Dispatcher.UIThread.**Invoke**`, not `Post`. Posting would let the decode thread write the next
+frame over the buffer before the UI thread had blitted this one — tearing under exactly the load
+that makes it hardest to diagnose. Blocking there costs one memcpy of decode throughput and
+applies backpressure to the receive side, which is the right thing to give up.
+
 `FFmpegH264DecoderTests.The_conversion_buffer_is_reused_between_frames_of_the_same_size` asserts
 the middle one directly, by identity. If it ever fails, the design has been broken.
 
