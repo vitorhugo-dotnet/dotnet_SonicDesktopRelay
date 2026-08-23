@@ -67,7 +67,7 @@ verificável de ponta a ponta.
 | 0 | `dotnet_SonicRelay` | Tipo de device, modo de sessão, auto-pareamento, restrição de join, métricas |
 | 1 | `dotnet_SonicDesktopRelay` | Shell Avalonia, identidade, API, signaling, sessão — sem mídia |
 | 2 | `dotnet_SonicDesktopRelay` | Captura, encode H.264, publicação de vídeo para N viewers |
-| 3 | `dotnet_SonicDesktopRelay` | Decode, render, playback — o lado que assiste |
+| 3 | `dotnet_SonicDesktopRelay` | Decode e render do vídeo — o lado que assiste |
 | 4 | `dotnet_SonicDesktopRelay` | Áudio do sistema, Diagnóstico, Configurações, instalador |
 
 A Fase 0 precisa estar publicada antes de a Fase 1 conseguir sequer obter um token. As
@@ -239,9 +239,11 @@ manda o usuário depurar a coisa errada.
 
 ## Fase 4 — Áudio, Diagnóstico, Configurações, instalador
 
-**Áudio.** Loopback WASAPI do endpoint de renderização padrão, codificado em Opus, publicado
-como segundo track na mesma peer connection. Uma direção só: quem assiste ouve, não fala.
-Silêncio prolongado na captura é reportado como estado, não como erro.
+**Áudio, das duas pontas.** Loopback WASAPI do endpoint de renderização padrão, codificado em
+Opus, publicado como segundo track na mesma peer connection — e, do outro lado, decode e
+playback. As duas metades ficam na mesma fase de propósito: entregar só a captura deixaria
+áudio que ninguém ouve, e só o playback não teria o que tocar. Uma direção só: quem assiste
+ouve, não fala. Silêncio prolongado na captura é reportado como estado, não como erro.
 
 **Diagnóstico.** Console técnico com o que a Fase 2 e a 3 medem: encoder escolhido, fps,
 bitrate, resolução, RTT, jitter, perda, direto vs. relay, estado ICE. Exportação de relatório
