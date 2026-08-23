@@ -15,7 +15,12 @@ namespace SonicDesktopRelay.App;
 [SupportedOSPlatform("windows")]
 public sealed class AppComposition
 {
-    public AppComposition(BackendSettings settings)
+    /// <param name="deviceName">
+    /// The name this machine registers under. It reaches the backend only at bootstrap: the
+    /// device API has no rename route, so on every later run the stored identity already
+    /// carries whatever name the first run sent.
+    /// </param>
+    public AppComposition(BackendSettings settings, string deviceName)
     {
         Settings = settings;
         var store = new FileDeviceCredentialStore(FileDeviceCredentialStore.DefaultPath);
@@ -23,7 +28,7 @@ public sealed class AppComposition
         var deviceApi = new DeviceApiClient(deviceHttp);
         Identity = new DeviceIdentityService(store, deviceApi, TimeProvider.System);
 
-        var sessionHttp = new HttpClient(new BearerTokenHandler(Identity, Environment.MachineName))
+        var sessionHttp = new HttpClient(new BearerTokenHandler(Identity, deviceName))
         {
             BaseAddress = settings.BaseAddress
         };
@@ -32,7 +37,7 @@ public sealed class AppComposition
             () => new SignalingConnection(
                 new ClientWebSocketAdapter(),
                 settings,
-                ct => Identity.GetAccessTokenAsync(Environment.MachineName, ct)));
+                ct => Identity.GetAccessTokenAsync(deviceName, ct)));
     }
 
     public BackendSettings Settings { get; }

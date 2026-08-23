@@ -54,6 +54,10 @@ public sealed class Shell : INotifyPropertyChanged
         {
             if (_deviceName == value) return;
             _deviceName = value;
+            // Same reason as the backend address: the composition captured the old value.
+            // It only reaches the backend on a first-ever bootstrap, but a composition built
+            // with a stale name would send the stale one if registration happens later.
+            _composition = null;
             Raise();
         }
     }
@@ -102,7 +106,7 @@ public sealed class Shell : INotifyPropertyChanged
 
         if (_composition is null)
         {
-            _composition = new AppComposition(settings);
+            _composition = new AppComposition(settings, _deviceName);
             _composition.Runtime.Changed += OnSnapshot;
             ViewModel.Apply(_composition.Runtime.Snapshot);
         }

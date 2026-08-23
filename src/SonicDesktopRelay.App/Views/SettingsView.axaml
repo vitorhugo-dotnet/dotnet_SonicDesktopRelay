@@ -27,6 +27,11 @@
                        Foreground="{StaticResource TextSecondaryBrush}" />
             <TextBox Width="420"
                      Text="{Binding DeviceName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+            <TextBlock Text="Used only when this computer registers for the first time. The backend has no rename, so changing it later has no effect."
+                       TextWrapping="Wrap"
+                       MaxWidth="420"
+                       FontSize="{StaticResource FontSizeSm}"
+                       Foreground="{StaticResource TextSecondaryBrush}" />
         </StackPanel>
 
         <TextBlock Text="This device registers itself the first time it reaches the backend. There is no sign-in."
