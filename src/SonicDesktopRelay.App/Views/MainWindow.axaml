@@ -13,6 +13,7 @@
         Title="SonicDesktopRelay">
     <Grid ColumnDefinitions="180,*">
         <Border Grid.Column="0"
+                IsVisible="{Binding !IsVideoFullScreen}"
                 Background="{StaticResource RailBrush}"
                 BorderBrush="{StaticResource BorderBrush}"
                 BorderThickness="0,0,1,0"

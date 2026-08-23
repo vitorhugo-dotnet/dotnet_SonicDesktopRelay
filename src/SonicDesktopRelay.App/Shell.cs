@@ -26,8 +26,15 @@ public sealed class Shell : INotifyPropertyChanged
     private string _deviceName = Environment.MachineName;
     private string? _shellError;
     private MonitorInfo? _selectedMonitor;
+    private bool _isVideoFullScreen;
 
     public event PropertyChangedEventHandler? PropertyChanged;
+
+    /// <summary>
+    /// One decoded frame, already on the UI thread. The watch view owns the surface; the
+    /// shell only carries the frame across the thread boundary, exactly as it does snapshots.
+    /// </summary>
+    public event Action<VideoFrame>? FrameDecoded;
 
     public MainWindowViewModel ViewModel { get; } = new();
 
@@ -75,6 +82,21 @@ public sealed class Shell : INotifyPropertyChanged
         {
             if (_shellError == value) return;
             _shellError = value;
+            Raise();
+        }
+    }
+
+    /// <summary>
+    /// True while the picture fills the window and the navigation rail is out of the way.
+    /// F11 toggles it, Esc leaves it.
+    /// </summary>
+    public bool IsVideoFullScreen
+    {
+        get => _isVideoFullScreen;
+        set
+        {
+            if (_isVideoFullScreen == value) return;
+            _isVideoFullScreen = value;
             Raise();
         }
     }
@@ -184,6 +206,13 @@ public sealed class Shell : INotifyPropertyChanged
             ShellError = e.Message;
         }
     }
+
+    /// <summary>
+    /// Called from the decode thread. Rendering is the UI thread's job and decoding must not
+    /// be, so this is the single hand-off point between them.
+    /// </summary>
+    internal void PublishFrame(VideoFrame frame) =>
+        Dispatcher.UIThread.Post(() => FrameDecoded?.Invoke(frame));
 
     // Snapshots arrive on whatever thread the signaling receive loop is running on; bindings
     // and the observable collection are the UI thread's alone.
