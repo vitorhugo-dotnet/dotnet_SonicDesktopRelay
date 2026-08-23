@@ -8,7 +8,7 @@ same encoded stream.
 
 - Windows 10 build 19041 or later.
 - .NET 10 SDK.
-- **FFmpeg 8.1, shared build** for encoding — `winget install Gyan.FFmpeg.Shared`. Version 9.x is
+- **FFmpeg 8.1, shared build** for encoding and decoding — `winget install Gyan.FFmpeg.Shared`. Version 9.x is
   ABI-incompatible and is deliberately rejected. See
   [docs/screen-publishing.md](docs/screen-publishing.md#ffmpeg-requirement).
 
@@ -30,9 +30,9 @@ runs on fakes.
 | `SonicDesktopRelay.Core` | `net10.0` | Device identity, credential storage, settings |
 | `SonicDesktopRelay.ApiClient` | `net10.0` | Typed HTTP: devices, sessions, ICE servers |
 | `SonicDesktopRelay.Signaling` | `net10.0` | WebSocket signaling, envelope, reconnection |
-| `SonicDesktopRelay.Media` | `net10.0` | Platform-neutral media contracts and the publish pipeline |
-| `SonicDesktopRelay.Media.Windows` | `net10.0-windows10.0.19041.0` | Windows.Graphics.Capture and the FFmpeg H.264 encoder |
-| `SonicDesktopRelay.Rtc` | `net10.0` | Peer connections, negotiation, fan-out to N viewers |
+| `SonicDesktopRelay.Media` | `net10.0` | Platform-neutral media contracts, the publish and watch pipelines |
+| `SonicDesktopRelay.Media.Windows` | `net10.0-windows10.0.19041.0` | Windows.Graphics.Capture and the FFmpeg H.264 encoder and decoder |
+| `SonicDesktopRelay.Rtc` | `net10.0` | Peer connections, both halves of negotiation, fan-out to N viewers |
 | `SonicDesktopRelay.Presentation` | `net10.0` | Session state machine and view models |
 | `SonicDesktopRelay.App` | `net10.0-windows10.0.19041.0` | Avalonia shell and composition root |
 
@@ -43,6 +43,7 @@ without a GPU.
 
 ## Documentation
 
-- [Screen publishing](docs/screen-publishing.md) — capture, encoder selection, the FFmpeg
-  requirement, and the quality ladder.
+- [Screen publishing and watching](docs/screen-publishing.md) — capture, encoder and decoder
+  selection, the FFmpeg requirement, the quality ladder, and why a stall is not a
+  disconnection.
 - [Design spec](docs/superpowers/specs/2026-08-23-sonicdesktoprelay-design.md).

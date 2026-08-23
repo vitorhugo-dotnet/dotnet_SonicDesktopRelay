@@ -166,11 +166,147 @@ Signaling flow, per viewer, over the existing session socket:
 
 - One monitor at a time. No window or region capture.
 - No audio. `WASAPI` is a later phase.
-- **No viewer-side rendering.** This phase only publishes; a SonicDesktopRelay viewer cannot
-  display the stream until phase 3.
 - No simulcast or SVC — one encode, one quality, for everyone.
 - The offer advertises `transport-cc` but not `nack pli` as an `rtcp-fb` attribute, because
   SIPSorcery generates the media line. PLI-driven keyframes therefore depend on the viewer
   sending one anyway; the `connected` transition also forces a keyframe, which covers the join
   case.
+- Never log SDP, ICE candidates, or frame contents.
+
+---
+
+# Watching a shared screen
+
+The mirror image of everything above: receive, decode, render.
+
+```
+SipSorceryViewerPeerConnection ──encoded sample──▶ ScreenWatchPipeline ──VideoFrame──▶ VideoSurface
+      (one per session)                            (FFmpegH264Decoder,                 (one recycled
+                                                    one per session)                    WriteableBitmap)
+```
+
+One publisher means one peer connection, one decoder and one pipeline. Nothing here fans out,
+which is why the viewer side is the simpler half.
+
+## Negotiation, from the viewer's end
+
+`VideoSubscriber` owns the single peer and the whole viewer half of signaling:
+
+1. `publisher.ready` → learn the publisher's `participantId` **from the authenticated `from`
+   field**, never from the payload, and reply `viewer.ready`.
+2. `webrtc.offer` → create the peer on first use, `setRemoteDescription`, `createAnswer`,
+   `setLocalDescription`, send `webrtc.answer` back to the publisher.
+3. Gathered candidates go out as `webrtc.ice_candidate`; inbound ones are applied.
+4. A later offer is a **renegotiation** and lands on the same peer. The publisher renegotiates
+   when the monitor resolution changes, and building a second peer would leak the first.
+
+Every frame whose `from` is not the publisher is dropped. A session can hold other viewers, and
+none of them may drive this connection.
+
+**The publishing half of this app never sends `publisher.ready`.** `VideoPublisher` sends
+`webrtc.offer` straight off `session.joined` (see the phase-2 flow above), so a viewer that
+waited for `publisher.ready` would never connect to its own product. The subscriber therefore
+also accepts the authenticated sender of the **first offer** as the publisher. `publisher.ready`
+still works, and is still preferred when a publisher sends it; the offer is the fallback that
+makes the two halves of this codebase meet.
+
+`SipSorceryViewerPeerConnection` holds a single **`recvonly`** H.264 track (payload type 96,
+`packetization-mode=1`) and takes frames from `OnVideoFrameReceived` — SIPSorcery reassembles
+RTP into whole access units and hands them over **still encoded**. Decoding is this project's
+job: the decoder has to be ours for the Diagnostics page to be able to name it.
+
+There is **no audio track** in this phase. The publisher does not send one until phase 4, so a
+viewer-side audio path would have nothing to play.
+
+## Decoder selection
+
+`FFmpegH264Decoder` uses the **software `h264` decoder**, and that is a deliberate choice
+rather than a missing feature.
+
+| Candidate | Result |
+|---|---|
+| `h264_cuvid` | opens and decodes correctly — **rejected anyway**, see below |
+| `h264_qsv` | same buffering behaviour through its async pipeline; rejected for the same reason |
+| `h264` | **selected** |
+
+NVDEC's parser will not release a picture until the *next* packet arrives to close it. Neither
+`AV_CODEC_FLAG_LOW_DELAY` nor `surfaces=1` changes that; it was measured, not assumed. On
+ordinary video that costs latency only. On a **shared screen** it costs correctness: the picture
+is static for long stretches and the publisher only encodes when something moves, so the viewer
+would sit on the second-to-last frame indefinitely — showing a stale window the moment the user
+stopped moving, and only catching up when they moved again. Software H.264 at 1080p30 costs a
+few percent of one core, which is a very cheap price for a picture that is actually current.
+
+The decoder is opened by actually opening a context, as the encoder is, and the rejection log is
+on the Diagnostics page beside the encoder's.
+
+Frame threading is off (`FF_THREAD_SLICE` only) for the same reason: frame threading holds
+several pictures back before emitting the first.
+
+## No allocation per frame
+
+This is the phase's defining constraint, the way encode-once was phase 2's. At 1080p30 a fresh
+1080p BGRA buffer per frame is roughly **250 MB/s of garbage**, and the GC pauses that buys show
+up as stutter in exactly the content people notice it in.
+
+Three buffers exist, all reused and rebuilt only when the picture size changes:
+
+- the decoder's **input staging buffer** — FFmpeg reads up to `AV_INPUT_BUFFER_PADDING_SIZE`
+  bytes past the end of a packet, so packets are staged rather than pinned in place;
+- the decoder's **BGRA output buffer**, the `sws_scale` target, handed out inside the
+  `VideoFrame` exactly as `GraphicsCaptureScreenSource` hands out its capture buffer — consumers
+  must blit before returning;
+- the surface's **`WriteableBitmap`**, recreated only when the frame size differs from the
+  current one.
+
+`FFmpegH264DecoderTests.The_conversion_buffer_is_reused_between_frames_of_the_same_size` asserts
+the middle one directly, by identity. If it ever fails, the design has been broken.
+
+## Threads
+
+Decoding must not happen on the UI thread; rendering must. Samples arrive on a SIPSorcery
+receive thread, are decoded there, and cross to the UI thread exactly once, at
+`Shell.PublishFrame`, which posts through `Dispatcher.UIThread` the way the shell already does
+for snapshots. `VideoSurface.Present` asserts it with `Dispatcher.UIThread.VerifyAccess()`.
+
+## Stalled is not disconnected
+
+`WatchState` has four values: `Waiting`, `Receiving`, `Stalled`, `Failed`.
+
+A **stall** is four seconds without a decoded frame. It is reported as its own state and never
+as a disconnection, because the peer connection can be perfectly healthy while the media has
+stopped — a frozen publisher, a wedged encoder, a path that has quietly stopped delivering. The
+two have different causes and different fixes, and calling a stall "disconnected" sends the user
+to check their network when the publisher's screen is the thing that has gone quiet.
+
+A stall also changes `SessionSnapshot.Watching`, **never** `SessionSnapshot.Phase`: the session
+is fine, the media is not.
+
+Every stall asks the publisher for exactly **one** keyframe, not one per watchdog tick.
+Flooding a publisher with PLIs is the worst thing to do to a link that is already failing to
+deliver. The ask is re-armed by the next frame that actually decodes.
+
+The pipeline holds no clock of its own — `RtcVideoWatchHost` ticks `CheckForStall()` once a
+second — which is what makes the whole watchdog testable over a `FakeTimeProvider`.
+
+## The picture
+
+`LetterboxGeometry.Fit` lives in `Presentation`, not in the control: it is pure arithmetic, it
+is where the bugs live, and there it is testable without a window. It picks the smaller of the
+width and height scale factors and centres the result, so the picture is letterboxed and
+**never stretched** — a distorted screen share is worse than black bars, because text stops
+being readable and nobody can tell why.
+
+`F11` fills the window with the picture and hides the navigation rail; `Esc` comes back. The key
+is handled on the window rather than on the surface, because a video surface is not focusable
+and nobody expects to have to click the picture first.
+
+## Known limits of this phase
+
+- Software decode only, for the reason above. A zero-delay hardware decoder would be a drop-in
+  addition to the candidate list.
+- No audio, either direction. Phase 4.
+- No jitter buffer and no reordering beyond what SIPSorcery's depacketiser does. A lost packet
+  produces a dropped frame and, eventually, a stall and a PLI.
+- The viewer never renegotiates on its own; it only answers.
 - Never log SDP, ICE candidates, or frame contents.
