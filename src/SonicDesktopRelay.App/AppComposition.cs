@@ -39,7 +39,9 @@ public sealed class AppComposition
         // out over the same socket the answers come back on — so the factory hands a reference
         // to whatever it most recently built.
         ISignalingConnection? current = null;
-        PublishHost = new RtcVideoPublishHost(new IceApiClient(sessionHttp), () => current);
+        var iceApi = new IceApiClient(sessionHttp);
+        PublishHost = new RtcVideoPublishHost(iceApi, () => current);
+        WatchHost = new RtcVideoWatchHost(iceApi, () => current);
 
         Runtime = new SessionRuntime(
             new SessionApiAdapter(new SessionApiClient(sessionHttp)),
@@ -51,7 +53,8 @@ public sealed class AppComposition
                     ct => Identity.GetAccessTokenAsync(deviceName, ct));
                 return current;
             },
-            PublishHost);
+            PublishHost,
+            WatchHost);
     }
 
     public BackendSettings Settings { get; }
@@ -61,6 +64,8 @@ public sealed class AppComposition
     public SessionRuntime Runtime { get; }
 
     public RtcVideoPublishHost PublishHost { get; }
+
+    public RtcVideoWatchHost WatchHost { get; }
 
     public IMonitorEnumerator Monitors { get; } = new MonitorEnumerator();
 }

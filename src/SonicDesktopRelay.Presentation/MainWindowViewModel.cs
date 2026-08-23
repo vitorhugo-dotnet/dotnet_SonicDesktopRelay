@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using SonicDesktopRelay.Media;
 
 namespace SonicDesktopRelay.Presentation;
 
@@ -52,7 +53,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         SessionPhase.Preparing => "Preparing to share…",
         SessionPhase.Sharing => $"Sharing — {_snapshot.ViewerCount} watching",
         SessionPhase.Joining => "Joining…",
-        SessionPhase.Watching => "Watching",
+        SessionPhase.Watching => WatchingText(_snapshot.Watching),
         SessionPhase.Ending => "Ending…",
         SessionPhase.Failed => FailureText(_snapshot.Error),
         _ => "Ready"
@@ -68,6 +69,19 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         Raise(nameof(Code));
         Raise(nameof(StatusText));
     }
+
+    /// <summary>
+    /// What a viewer is told. A stall is never called a disconnection: the session and the
+    /// peer connection can both be perfectly healthy while the picture has stopped, and the
+    /// two have different causes and different fixes.
+    /// </summary>
+    private static string WatchingText(WatchState? state) => state switch
+    {
+        WatchState.Waiting => "Connected — waiting for the first frame",
+        WatchState.Stalled => "Connected, but no picture is arriving",
+        WatchState.Failed => "The picture could not be decoded",
+        _ => "Watching"
+    };
 
     // The API's codes are deliberately vague about *why* a code failed, and so is this: a
     // message that distinguished "expired" from "wrong" would help someone guessing codes.

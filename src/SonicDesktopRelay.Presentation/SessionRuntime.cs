@@ -12,10 +12,12 @@ namespace SonicDesktopRelay.Presentation;
 public sealed class SessionRuntime(
     ISessionApi api,
     Func<ISignalingConnection> connectionFactory,
-    IVideoPublishHost? publishHost = null)
+    IVideoPublishHost? publishHost = null,
+    IVideoWatchHost? watchHost = null)
 {
     private ISignalingConnection? _connection;
     private bool _isOwner;
+    private bool _watchHooked;
 
     public SessionSnapshot Snapshot { get; private set; } = SessionSnapshot.Idle;
 
@@ -68,7 +70,32 @@ public sealed class SessionRuntime(
             var sessionId = await api.JoinAsync(code, ct);
             _isOwner = false;
             await AttachAsync(sessionId, ct);
-            Publish(new SessionSnapshot(SessionPhase.Watching, null, sessionId, 0, _connection!.State, null));
+
+            if (watchHost is not null)
+            {
+                if (!_watchHooked)
+                {
+                    watchHost.WatchStateChanged += OnWatchState;
+                    _watchHooked = true;
+                }
+
+                try
+                {
+                    await watchHost.StartAsync(ct);
+                }
+                catch (Exception e) when (e is InvalidOperationException or PlatformNotSupportedException)
+                {
+                    // Same reasoning as the publishing side: the socket is up but nothing can
+                    // be rendered over it, and leaving the runtime in Joining would wedge it.
+                    await watchHost.StopAsync();
+                    await FailAsync("media_unavailable");
+                    return;
+                }
+            }
+
+            Publish(new SessionSnapshot(SessionPhase.Watching, null, sessionId, 0, _connection!.State, null,
+                Watching: watchHost is null ? null : WatchState.Waiting,
+                DecoderName: watchHost?.DecoderName));
         }
         catch (SessionApiFailure failure)
         {
@@ -84,6 +111,7 @@ public sealed class SessionRuntime(
         // Capture stops before the session ends: the last thing a viewer should see is the
         // screen going away, not frames arriving for a session the server has already closed.
         if (publishHost is not null) await publishHost.StopAsync();
+        if (watchHost is not null) await watchHost.StopAsync();
 
         // Only the publishing device may end a session for everyone; a viewer leaving simply
         // drops its own connection, and calling end as a viewer would be a 403 at best.
@@ -131,9 +159,19 @@ public sealed class SessionRuntime(
     private void OnFrame(SignalingEnvelope envelope)
     {
         var sharing = Snapshot.Phase == SessionPhase.Sharing;
+        var watching = Snapshot.Phase == SessionPhase.Watching;
 
         switch (envelope.Type)
         {
+            // One machine covers both roles, so the two negotiation halves have to be kept
+            // apart: a sharing device that answered its own offers would negotiate with itself.
+            case SignalingMessageTypes.PublisherReady when watching:
+            case SignalingMessageTypes.WebRtcOffer when watching:
+            case SignalingMessageTypes.WebRtcIceCandidate when watching:
+                if (watchHost is not null)
+                    _ = watchHost.HandleSignalingAsync(envelope, CancellationToken.None);
+                break;
+
             case SignalingMessageTypes.SessionJoined when sharing:
                 Publish(Snapshot with { ViewerCount = Snapshot.ViewerCount + 1 });
                 AddViewer(envelope);
@@ -165,6 +203,7 @@ public sealed class SessionRuntime(
 
             case SignalingMessageTypes.SessionEnded:
                 if (publishHost is not null) _ = publishHost.StopAsync();
+                if (watchHost is not null) _ = watchHost.StopAsync();
                 _ = DetachAsync();
                 Publish(SessionSnapshot.Idle);
                 break;
@@ -195,6 +234,17 @@ public sealed class SessionRuntime(
     }
 
     private void OnSignalingState(SignalingState state) => Publish(Snapshot with { Signaling = state });
+
+    /// <summary>
+    /// A media stall changes what the viewer is seeing, never what the session is. Writing it
+    /// into <see cref="SessionSnapshot.Phase"/> would claim the connection had dropped when it
+    /// had not.
+    /// </summary>
+    private void OnWatchState(WatchState state)
+    {
+        if (Snapshot.Phase != SessionPhase.Watching) return;
+        Publish(Snapshot with { Watching = state });
+    }
 
     private async Task FailAsync(string code)
     {

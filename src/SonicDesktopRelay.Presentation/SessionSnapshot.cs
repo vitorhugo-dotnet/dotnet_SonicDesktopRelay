@@ -28,7 +28,15 @@ public sealed record SessionSnapshot(
     /// <summary>The codec that actually opened, e.g. "h264_nvenc". Null when not sharing.</summary>
     string? EncoderName = null,
     int FramesPerSecond = 0,
-    int VideoHeight = 0)
+    int VideoHeight = 0,
+    /// <summary>
+    /// What the inbound media is doing, when watching. Deliberately separate from
+    /// <see cref="Phase"/>: a stall is the media stopping while the session stays perfectly
+    /// healthy, and folding it into the phase would send the user to debug the wrong thing.
+    /// </summary>
+    WatchState? Watching = null,
+    /// <summary>The decoder that actually opened, e.g. "h264". Null when not watching.</summary>
+    string? DecoderName = null)
 {
     public static SessionSnapshot Idle { get; } =
         new(SessionPhase.Idle, null, null, 0, SignalingState.Disconnected, null);
@@ -71,6 +79,24 @@ public interface IVideoPublishHost : IAsyncDisposable
     Task AddViewerAsync(Guid participantId, CancellationToken ct);
 
     Task RemoveViewerAsync(Guid participantId);
+
+    Task HandleSignalingAsync(SignalingEnvelope envelope, CancellationToken ct);
+}
+
+/// <summary>
+/// The viewer's mirror of <see cref="IVideoPublishHost"/>. There is no viewer list here: a
+/// viewer has exactly one publisher, so there is exactly one peer and one decoder.
+/// </summary>
+public interface IVideoWatchHost : IAsyncDisposable
+{
+    string? DecoderName { get; }
+
+    /// <summary>Waiting, receiving, stalled or failed. Raised off the UI thread.</summary>
+    event Action<WatchState>? WatchStateChanged;
+
+    Task StartAsync(CancellationToken ct);
+
+    Task StopAsync();
 
     Task HandleSignalingAsync(SignalingEnvelope envelope, CancellationToken ct);
 }

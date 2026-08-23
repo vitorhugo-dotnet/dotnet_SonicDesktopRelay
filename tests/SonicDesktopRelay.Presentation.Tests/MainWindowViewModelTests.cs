@@ -1,3 +1,4 @@
+using SonicDesktopRelay.Media;
 using SonicDesktopRelay.Signaling;
 using Xunit;
 
@@ -95,5 +96,23 @@ public sealed class MainWindowViewModelTests
             Guid.NewGuid(), 2, SignalingState.Connected, null));
 
         Assert.Equal("Sharing — 2 watching", viewModel.StatusText);
+    }
+
+    [Theory]
+    [InlineData(WatchState.Waiting, "Connected — waiting for the first frame")]
+    [InlineData(WatchState.Receiving, "Watching")]
+    [InlineData(WatchState.Stalled, "Connected, but no picture is arriving")]
+    [InlineData(WatchState.Failed, "The picture could not be decoded")]
+    public void A_viewer_is_told_what_the_media_is_doing(WatchState state, string expected)
+    {
+        var viewModel = new MainWindowViewModel();
+
+        viewModel.Apply(new SessionSnapshot(SessionPhase.Watching, null, Guid.NewGuid(), 0,
+            SignalingState.Connected, null, Watching: state));
+
+        // A stall is not a disconnection. Saying "disconnected" would send the user to check
+        // their network when the publisher's screen is the thing that has gone quiet.
+        Assert.Equal(expected, viewModel.StatusText);
+        Assert.DoesNotContain("isconnect", viewModel.StatusText);
     }
 }

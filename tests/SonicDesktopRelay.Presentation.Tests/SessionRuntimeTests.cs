@@ -269,6 +269,182 @@ public sealed class SessionRuntimeTests
         Assert.Equal(1, api.EndCalls);
     }
 
+    [Fact]
+    public async Task Watching_starts_the_watch_host()
+    {
+        var api = new FakeSessionApi();
+        var host = new FakeVideoWatchHost();
+        var runtime = new SessionRuntime(api, () => new FakeConnection(), watchHost: host);
+
+        await runtime.StartWatchingAsync("AB12CD", CancellationToken.None);
+
+        Assert.True(host.Started);
+        Assert.Equal(SessionPhase.Watching, runtime.Snapshot.Phase);
+    }
+
+    [Fact]
+    public async Task The_snapshot_reports_the_decoder_in_use()
+    {
+        var api = new FakeSessionApi();
+        var host = new FakeVideoWatchHost { DecoderName = "h264" };
+        var runtime = new SessionRuntime(api, () => new FakeConnection(), watchHost: host);
+
+        await runtime.StartWatchingAsync("AB12CD", CancellationToken.None);
+
+        Assert.Equal("h264", runtime.Snapshot.DecoderName);
+    }
+
+    [Fact]
+    public async Task The_snapshot_reports_the_watch_state()
+    {
+        var api = new FakeSessionApi();
+        var host = new FakeVideoWatchHost();
+        var runtime = new SessionRuntime(api, () => new FakeConnection(), watchHost: host);
+        await runtime.StartWatchingAsync("AB12CD", CancellationToken.None);
+
+        host.Raise(WatchState.Receiving);
+
+        Assert.Equal(WatchState.Receiving, runtime.Snapshot.Watching);
+    }
+
+    [Fact]
+    public async Task A_stall_is_visible_in_the_snapshot_without_leaving_the_watching_phase()
+    {
+        var api = new FakeSessionApi();
+        var host = new FakeVideoWatchHost();
+        var runtime = new SessionRuntime(api, () => new FakeConnection(), watchHost: host);
+        await runtime.StartWatchingAsync("AB12CD", CancellationToken.None);
+        host.Raise(WatchState.Receiving);
+
+        host.Raise(WatchState.Stalled);
+
+        // The session is fine; the media is not. Reporting a stall as a phase change would
+        // send the user to debug the connection instead of the publisher's screen.
+        Assert.Equal(SessionPhase.Watching, runtime.Snapshot.Phase);
+        Assert.Equal(WatchState.Stalled, runtime.Snapshot.Watching);
+    }
+
+    [Fact]
+    public async Task An_offer_from_the_publisher_is_forwarded_to_the_watch_host()
+    {
+        var api = new FakeSessionApi();
+        var host = new FakeVideoWatchHost();
+        var connection = new FakeConnection();
+        var runtime = new SessionRuntime(api, () => connection, watchHost: host);
+        await runtime.StartWatchingAsync("AB12CD", CancellationToken.None);
+
+        connection.Emit(SignalingMessageTypes.PublisherReady);
+        connection.Emit(SignalingMessageTypes.WebRtcOffer);
+        connection.Emit(SignalingMessageTypes.WebRtcIceCandidate);
+
+        Assert.Equal(
+            [
+                SignalingMessageTypes.PublisherReady,
+                SignalingMessageTypes.WebRtcOffer,
+                SignalingMessageTypes.WebRtcIceCandidate
+            ],
+            host.Signalled);
+    }
+
+    [Fact]
+    public async Task A_publisher_never_feeds_its_own_frames_to_a_watch_host()
+    {
+        var api = new FakeSessionApi();
+        var host = new FakeVideoWatchHost();
+        var connection = new FakeConnection();
+        var runtime = new SessionRuntime(api, () => connection, watchHost: host);
+        await runtime.StartSharingAsync(Monitor, 3, CancellationToken.None);
+
+        connection.Emit(SignalingMessageTypes.WebRtcOffer);
+
+        // One machine covers both roles, so the runtime has to keep them apart: a sharing
+        // device answering its own offers would negotiate with itself.
+        Assert.Empty(host.Signalled);
+    }
+
+    [Fact]
+    public async Task Session_ended_stops_the_watch_host_and_returns_to_idle()
+    {
+        var api = new FakeSessionApi();
+        var host = new FakeVideoWatchHost();
+        var connection = new FakeConnection();
+        var runtime = new SessionRuntime(api, () => connection, watchHost: host);
+        await runtime.StartWatchingAsync("AB12CD", CancellationToken.None);
+
+        connection.Emit(SignalingMessageTypes.SessionEnded);
+
+        Assert.True(host.Stopped);
+        Assert.Equal(SessionPhase.Idle, runtime.Snapshot.Phase);
+        Assert.Null(runtime.Snapshot.Watching);
+    }
+
+    [Fact]
+    public async Task Stopping_a_watched_session_disposes_the_host_without_ending_the_session()
+    {
+        var api = new FakeSessionApi();
+        var host = new FakeVideoWatchHost();
+        var runtime = new SessionRuntime(api, () => new FakeConnection(), watchHost: host);
+        await runtime.StartWatchingAsync("AB12CD", CancellationToken.None);
+
+        await runtime.StopAsync(CancellationToken.None);
+
+        // Only the publisher may end a session; a viewer leaving is a local teardown.
+        Assert.True(host.Stopped);
+        Assert.Equal(0, api.EndCalls);
+        Assert.Equal(SessionPhase.Idle, runtime.Snapshot.Phase);
+    }
+
+    [Fact]
+    public async Task A_watch_stack_that_cannot_start_fails_the_session_rather_than_watching_a_black_window()
+    {
+        var api = new FakeSessionApi();
+        var host = new FakeVideoWatchHost { StartFailure = "no H.264 decoder could be opened" };
+        var runtime = new SessionRuntime(api, () => new FakeConnection(), watchHost: host);
+
+        await runtime.StartWatchingAsync("AB12CD", CancellationToken.None);
+
+        Assert.Equal(SessionPhase.Failed, runtime.Snapshot.Phase);
+        Assert.Equal("media_unavailable", runtime.Snapshot.Error);
+    }
+
+    private sealed class FakeVideoWatchHost : IVideoWatchHost
+    {
+        public List<string> Signalled { get; } = [];
+
+        public bool Started { get; private set; }
+
+        public bool Stopped { get; private set; }
+
+        public string? DecoderName { get; init; }
+
+        public string? StartFailure { get; init; }
+
+        public event Action<WatchState>? WatchStateChanged;
+
+        public Task StartAsync(CancellationToken ct)
+        {
+            if (StartFailure is not null) throw new InvalidOperationException(StartFailure);
+            Started = true;
+            return Task.CompletedTask;
+        }
+
+        public Task StopAsync()
+        {
+            Stopped = true;
+            return Task.CompletedTask;
+        }
+
+        public Task HandleSignalingAsync(SignalingEnvelope envelope, CancellationToken ct)
+        {
+            Signalled.Add(envelope.Type);
+            return Task.CompletedTask;
+        }
+
+        public void Raise(WatchState state) => WatchStateChanged?.Invoke(state);
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
     private sealed class FakeVideoPublishHost : IVideoPublishHost
     {
         public List<Guid> Viewers { get; } = [];

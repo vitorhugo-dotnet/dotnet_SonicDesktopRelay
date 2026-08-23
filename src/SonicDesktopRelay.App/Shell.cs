@@ -120,18 +120,38 @@ public sealed class Shell : INotifyPropertyChanged
     {
         get
         {
-            var host = _composition?.PublishHost;
-            if (host?.StartFailure is { } failure) return $"Media failed to start: {failure}";
-            if (host?.EncoderName is not { } encoder) return "Encoder: not started";
-
             var snapshot = ViewModel.Snapshot;
-            var rejected = host.EncoderRejections.Count == 0
-                ? "none rejected"
-                : string.Join("; ", host.EncoderRejections);
-            return $"Encoder: {encoder} — {snapshot.VideoHeight}p{snapshot.FramesPerSecond}, "
-                   + $"{snapshot.ViewerCount} viewer(s), FFmpeg at {FFmpegLoader.LibraryPath ?? "not found"} "
-                   + $"({rejected})";
+            return snapshot.Phase == SessionPhase.Watching || _composition?.WatchHost.DecoderName is not null
+                ? WatchStatusText(snapshot)
+                : PublishStatusText(snapshot);
         }
+    }
+
+    private string PublishStatusText(SessionSnapshot snapshot)
+    {
+        var host = _composition?.PublishHost;
+        if (host?.StartFailure is { } failure) return $"Media failed to start: {failure}";
+        if (host?.EncoderName is not { } encoder) return "Encoder: not started";
+
+        var rejected = host.EncoderRejections.Count == 0
+            ? "none rejected"
+            : string.Join("; ", host.EncoderRejections);
+        return $"Encoder: {encoder} — {snapshot.VideoHeight}p{snapshot.FramesPerSecond}, "
+               + $"{snapshot.ViewerCount} viewer(s), FFmpeg at {FFmpegLoader.LibraryPath ?? "not found"} "
+               + $"({rejected})";
+    }
+
+    private string WatchStatusText(SessionSnapshot snapshot)
+    {
+        var host = _composition?.WatchHost;
+        if (host?.StartFailure is { } failure) return $"Media failed to start: {failure}";
+        if (host?.DecoderName is not { } decoder) return "Decoder: not started";
+
+        var rejected = host.DecoderRejections.Count == 0
+            ? "none rejected"
+            : string.Join("; ", host.DecoderRejections);
+        return $"Decoder: {decoder} — {snapshot.Watching?.ToString() ?? "not watching"}, "
+               + $"FFmpeg at {FFmpegLoader.LibraryPath ?? "not found"} ({rejected})";
     }
 
     /// <summary>Refreshes <see cref="Monitors"/> from the OS and keeps a sensible selection.</summary>
@@ -186,6 +206,7 @@ public sealed class Shell : INotifyPropertyChanged
         {
             _composition = new AppComposition(settings, _deviceName);
             _composition.Runtime.Changed += OnSnapshot;
+            _composition.WatchHost.FrameDecoded += PublishFrame;
             ViewModel.Apply(_composition.Runtime.Snapshot);
         }
 
