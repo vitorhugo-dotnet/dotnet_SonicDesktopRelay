@@ -3,20 +3,37 @@ using System.Text.Json;
 
 namespace SonicDesktopRelay.ApiClient;
 
-public sealed class DeviceApiClient(HttpClient http)
+public sealed class DeviceApiClient(HttpClient http) : Core.Identity.IDeviceApi
 {
-    public async Task<BootstrapResponse> BootstrapAsync(string name, CancellationToken ct)
+    public async Task<BootstrapResponse> BootstrapRawAsync(string name, CancellationToken ct)
     {
         var response = await http.PostAsJsonAsync("/api/devices/bootstrap",
             new BootstrapRequest(name, DeviceConstants.DeviceType, DeviceConstants.Platform), ct);
         return await ApiResponse.ReadAsync<BootstrapResponse>(response, ct);
     }
 
-    public async Task<TokenResponse> TokenAsync(Guid deviceId, string credentialSecret, CancellationToken ct)
+    public async Task<TokenResponse> TokenRawAsync(Guid deviceId, string credentialSecret, CancellationToken ct)
     {
         var response = await http.PostAsJsonAsync("/api/devices/token",
             new TokenRequest(deviceId, credentialSecret), ct);
         return await ApiResponse.ReadAsync<TokenResponse>(response, ct);
+    }
+
+    async Task<Core.Identity.DeviceCredential> Core.Identity.IDeviceApi.BootstrapAsync(
+        string name, CancellationToken ct)
+    {
+        var response = await BootstrapRawAsync(name, ct);
+        return new Core.Identity.DeviceCredential(
+            response.DeviceId, response.CredentialSecret, response.CredentialVersion);
+    }
+
+    async Task<Core.Identity.AccessToken> Core.Identity.IDeviceApi.TokenAsync(
+        Guid deviceId, string secret, CancellationToken ct)
+    {
+        var response = await TokenRawAsync(deviceId, secret, ct);
+        return new Core.Identity.AccessToken(
+            response.AccessToken, response.ExpiresAt, response.DeviceId,
+            response.CredentialVersion, response.RotatedCredentialSecret);
     }
 }
 

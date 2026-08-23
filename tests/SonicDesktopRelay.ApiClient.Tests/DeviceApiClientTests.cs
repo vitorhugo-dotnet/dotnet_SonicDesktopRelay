@@ -12,7 +12,7 @@ public sealed class DeviceApiClientTests
             """{"deviceId":"6f9619ff-8b86-d011-b42d-00cf4fc964ff","credentialSecret":"abc","credentialVersion":1}""");
         var client = new DeviceApiClient(HttpClientFor(handler));
 
-        var response = await client.BootstrapAsync("Desk PC", CancellationToken.None);
+        var response = await client.BootstrapRawAsync("Desk PC", CancellationToken.None);
 
         Assert.Equal("/api/devices/bootstrap", handler.Requests[0].RequestUri!.AbsolutePath);
         Assert.Contains("\"deviceType\":\"windows_desktop\"", handler.RequestBodies[0]);
@@ -33,7 +33,7 @@ public sealed class DeviceApiClientTests
             """);
         var client = new DeviceApiClient(HttpClientFor(handler));
 
-        var response = await client.TokenAsync(Guid.NewGuid(), "old-secret", CancellationToken.None);
+        var response = await client.TokenRawAsync(Guid.NewGuid(), "old-secret", CancellationToken.None);
 
         Assert.Equal("jwt", response.AccessToken);
         Assert.Equal("new-secret", response.RotatedCredentialSecret);
@@ -51,7 +51,7 @@ public sealed class DeviceApiClientTests
             """);
         var client = new DeviceApiClient(HttpClientFor(handler));
 
-        var response = await client.TokenAsync(Guid.NewGuid(), "secret", CancellationToken.None);
+        var response = await client.TokenRawAsync(Guid.NewGuid(), "secret", CancellationToken.None);
 
         Assert.Null(response.RotatedCredentialSecret);
     }
@@ -64,7 +64,7 @@ public sealed class DeviceApiClientTests
         var client = new DeviceApiClient(HttpClientFor(handler));
 
         var exception = await Assert.ThrowsAsync<ApiException>(
-            () => client.BootstrapAsync("Desk PC", CancellationToken.None));
+            () => client.BootstrapRawAsync("Desk PC", CancellationToken.None));
 
         Assert.Equal(HttpStatusCode.BadRequest, exception.StatusCode);
         Assert.Equal("invalid_device_type", exception.ErrorCode);
@@ -77,7 +77,7 @@ public sealed class DeviceApiClientTests
         var client = new DeviceApiClient(HttpClientFor(handler));
 
         var exception = await Assert.ThrowsAsync<ApiException>(
-            () => client.BootstrapAsync("Desk PC", CancellationToken.None));
+            () => client.BootstrapRawAsync("Desk PC", CancellationToken.None));
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, exception.StatusCode);
         Assert.Null(exception.ErrorCode);
