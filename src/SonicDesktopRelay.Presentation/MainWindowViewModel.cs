@@ -77,6 +77,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         "invalid_code" => "That code is not valid, or the session has ended.",
         "not_paired" => "That code is not valid, or the session has ended.",
         "session_full" => "That session is already full.",
+        // Deliberately vague in the UI and precise in Diagnostics: the reason is a codec name
+        // or a missing DLL path, which means nothing on a Share button.
+        "media_unavailable" => "Screen capture or the video encoder could not start. See Diagnostics.",
         _ => "Something went wrong. Try again."
     };
 

@@ -253,6 +253,22 @@ public sealed class SessionRuntimeTests
         Assert.Contains(SignalingMessageTypes.WebRtcAnswer, host.Signalled);
     }
 
+    [Fact]
+    public async Task A_media_stack_that_cannot_start_fails_the_session_instead_of_hanging_in_preparing()
+    {
+        var api = new FakeSessionApi();
+        var host = new FakeVideoPublishHost { StartFailure = "no H.264 encoder could be opened" };
+        var runtime = new SessionRuntime(api, () => new FakeConnection(), host);
+
+        await runtime.StartSharingAsync(Monitor, 3, CancellationToken.None);
+
+        // The session exists on the backend but cannot carry video. Leaving the runtime in
+        // Preparing would wedge it: RequireIdle refuses every later start.
+        Assert.Equal(SessionPhase.Failed, runtime.Snapshot.Phase);
+        Assert.Equal("media_unavailable", runtime.Snapshot.Error);
+        Assert.Equal(1, api.EndCalls);
+    }
+
     private sealed class FakeVideoPublishHost : IVideoPublishHost
     {
         public List<Guid> Viewers { get; } = [];
@@ -265,8 +281,11 @@ public sealed class SessionRuntimeTests
 
         public string? EncoderName { get; init; }
 
+        public string? StartFailure { get; init; }
+
         public Task StartAsync(MonitorInfo monitor, CancellationToken ct)
         {
+            if (StartFailure is not null) throw new InvalidOperationException(StartFailure);
             StartedOn = monitor;
             return Task.CompletedTask;
         }

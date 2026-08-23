@@ -64,6 +64,18 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public void A_media_failure_points_at_Diagnostics_where_the_reason_actually_is()
+    {
+        var viewModel = new MainWindowViewModel();
+
+        viewModel.Apply(new SessionSnapshot(SessionPhase.Failed, null, null, 0,
+            SignalingState.Disconnected, "media_unavailable"));
+
+        Assert.Equal("Screen capture or the video encoder could not start. See Diagnostics.",
+            viewModel.StatusText);
+    }
+
+    [Fact]
     public void An_unrecognised_error_code_still_produces_a_usable_message()
     {
         var viewModel = new MainWindowViewModel();

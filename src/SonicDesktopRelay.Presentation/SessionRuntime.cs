@@ -31,7 +31,22 @@ public sealed class SessionRuntime(
             _isOwner = true;
             await AttachAsync(created.SessionId, ct);
 
-            if (publishHost is not null) await publishHost.StartAsync(monitor, ct);
+            if (publishHost is not null)
+            {
+                try
+                {
+                    await publishHost.StartAsync(monitor, ct);
+                }
+                catch (Exception e) when (e is InvalidOperationException or PlatformNotSupportedException)
+                {
+                    // The backend session is already up but nothing can be sent over it. Ending
+                    // it and landing in Failed is the only honest outcome: leaving the runtime
+                    // in Preparing would wedge it, because RequireIdle refuses every later start.
+                    await EndOwnedSessionAsync(created.SessionId, ct);
+                    await FailAsync("media_unavailable");
+                    return;
+                }
+            }
 
             var quality = VideoQuality.Default;
             Publish(new SessionSnapshot(SessionPhase.Sharing, created.Code, created.SessionId, 0,
@@ -72,20 +87,22 @@ public sealed class SessionRuntime(
 
         // Only the publishing device may end a session for everyone; a viewer leaving simply
         // drops its own connection, and calling end as a viewer would be a 403 at best.
-        if (_isOwner && Snapshot.SessionId is { } sessionId)
-        {
-            try
-            {
-                await api.EndAsync(sessionId, ct);
-            }
-            catch (SessionApiFailure)
-            {
-                // The session may already be over. Stopping locally must still succeed.
-            }
-        }
+        if (_isOwner && Snapshot.SessionId is { } sessionId) await EndOwnedSessionAsync(sessionId, ct);
 
         await DetachAsync();
         Publish(SessionSnapshot.Idle);
+    }
+
+    private async Task EndOwnedSessionAsync(Guid sessionId, CancellationToken ct)
+    {
+        try
+        {
+            await api.EndAsync(sessionId, ct);
+        }
+        catch (SessionApiFailure)
+        {
+            // The session may already be over. Stopping locally must still succeed.
+        }
     }
 
     private async Task AttachAsync(Guid sessionId, CancellationToken ct)
