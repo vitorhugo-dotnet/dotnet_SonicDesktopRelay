@@ -1,0 +1,221 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'Optional PR number: build and publish an alpha prerelease from that PR head (leave empty to build the selected branch).'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  SOLUTION_PATH: SonicDesktopRelay.sln
+  APP_PROJECT_PATH: src/SonicDesktopRelay.App/SonicDesktopRelay.App.csproj
+  CONFIGURATION: Release
+  RUNTIME_ID: win-x64
+  APP_EXE_NAME: SonicDesktopRelay.App.exe
+  PRODUCT_NAME: SonicDesktopRelay
+
+# Windows only, on purpose. SonicDesktopRelay captures the screen through
+# Windows.Graphics.Capture and stores its credential with DPAPI, so there is no Linux or
+# macOS artifact to package. The disabled cross-platform build/test jobs live in ci.yml;
+# packaging jobs will belong here once there is something to package.
+
+jobs:
+  build-test-and-release:
+    name: Build, test, and release
+    runs-on: windows-latest
+    timeout-minutes: 60
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+      target-sha: ${{ steps.release.outputs.target-sha }}
+      prerelease: ${{ steps.release.outputs.prerelease }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          # Full history and tags: resolving the most recent marker tag needs them.
+          fetch-depth: 0
+          # When a PR number is supplied, build that PR's head; otherwise the selected ref.
+          ref: ${{ github.event.inputs.pr_number && format('refs/pull/{0}/head', github.event.inputs.pr_number) || '' }}
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore dependencies
+        run: dotnet restore $env:SOLUTION_PATH
+
+      - name: Build solution
+        run: dotnet build $env:SOLUTION_PATH --configuration $env:CONFIGURATION --no-restore
+
+      - name: Run release publishing helper tests
+        shell: pwsh
+        run: ./tests/Publish-GitHubRelease.Tests.ps1
+
+      - name: Run .NET tests
+        run: >-
+          dotnet test $env:SOLUTION_PATH --configuration $env:CONFIGURATION --no-build --no-restore
+          --logger "trx;LogFilePrefix=sonicdesktoprelay-release"
+          --results-directory TestResults
+
+      - name: Resolve release version
+        id: release
+        shell: pwsh
+        run: |
+          $prNumber = '${{ github.event.inputs.pr_number }}'
+          $runNumber = '${{ github.run_number }}'
+
+          if ('${{ github.ref_type }}' -eq 'tag') {
+            # Real, verified release from a v* tag.
+            $tag = '${{ github.ref_name }}'
+            $version = $tag.TrimStart('v')
+            $prerelease = 'false'
+          }
+          elseif (-not [string]::IsNullOrWhiteSpace($prNumber)) {
+            # Manual alpha build from a specific PR head.
+            $tag = "v0.0.0-alpha.pr$prNumber.$runNumber"
+            $version = "0.0.0-alpha.pr$prNumber.$runNumber"
+            $prerelease = 'true'
+          }
+          else {
+            # Manual build of the selected branch. Its version is anchored to the most recent
+            # marker tag CI published (dev-N), so the number means something — "the branch as
+            # of marker 134" — instead of an unrelated workflow run counter. Falls back to 0
+            # in a repository that has not published a marker yet.
+            $markers = @(git tag --list 'dev-*' |
+              ForEach-Object { if ($_ -match '^dev-(\d+)$') { [int]$Matches[1] } } |
+              Sort-Object -Descending)
+            $latestMarker = if ($markers.Count -gt 0) { $markers[0] } else { 0 }
+
+            $tag = "v0.0.$latestMarker-manual.$runNumber"
+            $version = "0.0.$latestMarker-manual.$runNumber"
+            $prerelease = 'true'
+            Write-Host "Anchored this manual build to marker tag dev-$latestMarker."
+          }
+
+          # The commit actually checked out (the PR head for an alpha build), used as the
+          # release target so the tag points at exactly what was built.
+          $targetSha = (git rev-parse HEAD).Trim()
+
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "prerelease=$prerelease" >> $env:GITHUB_OUTPUT
+          "target-sha=$targetSha" >> $env:GITHUB_OUTPUT
+          "pr-number=$prNumber" >> $env:GITHUB_OUTPUT
+
+      - name: Restore Windows x64 publish dependencies
+        run: dotnet restore $env:APP_PROJECT_PATH --runtime $env:RUNTIME_ID
+
+      - name: Publish portable Windows x64 app
+        run: >-
+          dotnet publish $env:APP_PROJECT_PATH
+          --configuration $env:CONFIGURATION --runtime $env:RUNTIME_ID --self-contained true --no-restore
+          --output artifacts/publish/win-x64
+
+      - name: Publish single-file EXE
+        run: >-
+          dotnet publish $env:APP_PROJECT_PATH
+          --configuration $env:CONFIGURATION --runtime $env:RUNTIME_ID --self-contained true --no-restore
+          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true -p:DebugType=embedded
+          --output artifacts/publish/single-file
+
+      # As in ci.yml: no MSI or setup bundle until phase 4 adds packaging/*.wxs. Pin WiX to
+      # v5 when it arrives — v6+ requires accepting the Open Source Maintenance Fee EULA,
+      # which fails an unattended CI install.
+      - name: Create ZIP, EXE, and checksums
+        id: assets
+        shell: pwsh
+        run: |
+          $version = '${{ steps.release.outputs.version }}'
+          $publishDirectory = Join-Path $PWD 'artifacts/publish/win-x64'
+          $distDirectory = Join-Path $PWD 'artifacts/release'
+
+          New-Item -ItemType Directory -Force -Path $distDirectory | Out-Null
+
+          $zipPath = Join-Path $distDirectory "$env:PRODUCT_NAME-$env:RUNTIME_ID-$version.zip"
+          $exePath = Join-Path $distDirectory "$env:PRODUCT_NAME-$env:RUNTIME_ID-$version.exe"
+          $checksumsPath = Join-Path $distDirectory 'checksums-sha256.txt'
+
+          @(
+            "Version: $version"
+            "Commit: ${{ steps.release.outputs.target-sha }}"
+            "Runtime: $env:RUNTIME_ID"
+            "BuiltAtUtc: $((Get-Date).ToUniversalTime().ToString('O'))"
+          ) | Set-Content -LiteralPath (Join-Path $publishDirectory 'BUILD-INFO.txt')
+
+          Compress-Archive -Path "$publishDirectory/*" -DestinationPath $zipPath -CompressionLevel Optimal -Force
+          Copy-Item -Path (Join-Path $PWD "artifacts/publish/single-file/$env:APP_EXE_NAME") -Destination $exePath
+
+          Get-ChildItem -Path $distDirectory -File |
+            Where-Object { $_.Extension -in @('.zip', '.exe') } |
+            ForEach-Object {
+              $hash = Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256
+              "$($hash.Hash)  $($_.Name)"
+            } | Set-Content -LiteralPath $checksumsPath -Encoding ASCII
+
+          "zip=$zipPath" >> $env:GITHUB_OUTPUT
+          "exe=$exePath" >> $env:GITHUB_OUTPUT
+          "checksums=$checksumsPath" >> $env:GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = '${{ steps.release.outputs.tag }}'
+          $version = '${{ steps.release.outputs.version }}'
+          $targetSha = '${{ steps.release.outputs.target-sha }}'
+          $prNumber = '${{ steps.release.outputs.pr-number }}'
+          $isPrerelease = '${{ steps.release.outputs.prerelease }}' -eq 'true'
+
+          if (-not [string]::IsNullOrWhiteSpace($prNumber)) {
+            $title = "SonicDesktopRelay $tag (alpha, PR #$prNumber)"
+          } else {
+            $title = "SonicDesktopRelay $tag"
+          }
+
+          $extraArgs = @()
+          if ('${{ github.ref_type }}' -eq 'tag') {
+            # A pushed v* tag already exists; verify it points at this build.
+            $extraArgs += '--verify-tag'
+          } else {
+            # Manual runs create the tag on the built commit (the PR head for an alpha build).
+            $extraArgs += @('--target', $targetSha)
+          }
+          if ($isPrerelease) {
+            $extraArgs += '--prerelease'
+          } else {
+            # A verified v* release is what "Latest" should point at.
+            $extraArgs += '--latest'
+          }
+
+          $extraArgs += @(
+            '--generate-notes'
+            '--notes'
+            "Build version: $version`nCommit: $targetSha`nRuntime: $env:RUNTIME_ID"
+          )
+
+          $assets = @(
+            '${{ steps.assets.outputs.zip }}'
+            '${{ steps.assets.outputs.exe }}'
+            '${{ steps.assets.outputs.checksums }}'
+          )
+
+          # Retries transient GitHub API 5xx responses instead of failing a release whose
+          # packages were all produced successfully.
+          ./.github/scripts/Publish-GitHubRelease.ps1 `
+            -Tag $tag `
+            -Title $title `
+            -Asset $assets `
+            -ExtraArgument $extraArgs

@@ -65,10 +65,10 @@ verificável de ponta a ponta.
 | Fase | Repositório | Entrega |
 |---|---|---|
 | 0 | `dotnet_SonicRelay` | Tipo de device, modo de sessão, auto-pareamento, restrição de join, métricas |
-| 1 | `desktop_SonicRelay` | Shell Avalonia, identidade, API, signaling, sessão — sem mídia |
-| 2 | `desktop_SonicRelay` | Captura, encode H.264, publicação de vídeo para N viewers |
-| 3 | `desktop_SonicRelay` | Decode, render, playback — o lado que assiste |
-| 4 | `desktop_SonicRelay` | Áudio do sistema, Diagnóstico, Configurações, instalador |
+| 1 | `dotnet_SonicDesktopRelay` | Shell Avalonia, identidade, API, signaling, sessão — sem mídia |
+| 2 | `dotnet_SonicDesktopRelay` | Captura, encode H.264, publicação de vídeo para N viewers |
+| 3 | `dotnet_SonicDesktopRelay` | Decode, render, playback — o lado que assiste |
+| 4 | `dotnet_SonicDesktopRelay` | Áudio do sistema, Diagnóstico, Configurações, instalador |
 
 A Fase 0 precisa estar publicada antes de a Fase 1 conseguir sequer obter um token. As
 Fases 2 e 3 são independentes entre si depois que a Fase 1 fecha: uma produz mídia, a outra

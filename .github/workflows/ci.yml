@@ -1,0 +1,332 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: 'Optional release version, for example 0.1.0. Empty creates a dev release.'
+        required: false
+        type: string
+
+# Release publishing needs contents:write only in the packaging job.
+permissions:
+  contents: read
+
+env:
+  SOLUTION_PATH: SonicDesktopRelay.sln
+  APP_PROJECT_PATH: src/SonicDesktopRelay.App/SonicDesktopRelay.App.csproj
+  CONFIGURATION: Release
+  RUNTIME_ID: win-x64
+  APP_EXE_NAME: SonicDesktopRelay.App.exe
+  PRODUCT_NAME: SonicDesktopRelay
+
+jobs:
+  build-and-test:
+    name: Build and test (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore dependencies
+        run: dotnet restore $env:SOLUTION_PATH
+
+      - name: Build solution
+        run: dotnet build $env:SOLUTION_PATH --configuration $env:CONFIGURATION --no-restore
+
+      - name: Run release publishing helper tests
+        shell: pwsh
+        run: ./tests/Publish-GitHubRelease.Tests.ps1
+
+      - name: Run .NET tests
+        run: >-
+          dotnet test $env:SOLUTION_PATH --configuration $env:CONFIGURATION --no-build --no-restore
+          --logger "trx;LogFilePrefix=sonicdesktoprelay"
+          --results-directory TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-windows
+          path: TestResults/*.trx
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # ---------------------------------------------------------------------------
+  # Cross-platform jobs: present, deliberately not running.
+  #
+  # SonicDesktopRelay is Windows-only by design for now — screen capture uses
+  # Windows.Graphics.Capture and the credential store uses DPAPI. These two jobs
+  # are kept whole so the day the app grows a Linux or macOS story, enabling them
+  # is a repository-variable change rather than archaeology.
+  #
+  # To enable: set the repository variable ENABLE_CROSS_PLATFORM_CI to "true"
+  # (Settings → Secrets and variables → Actions → Variables).
+  #
+  # Known to fail as things stand, and worth fixing before enabling:
+  #   - FileDeviceCredentialStoreTests calls DPAPI (ProtectedData), which throws
+  #     PlatformNotSupportedException off Windows. Those tests need an OS guard
+  #     or a non-Windows credential store before this job can go green.
+  # Everything else in the solution is plain net10.0 and should build anywhere.
+  # ---------------------------------------------------------------------------
+  build-and-test-linux:
+    name: Build and test (Linux, disabled)
+    if: vars.ENABLE_CROSS_PLATFORM_CI == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore dependencies
+        run: dotnet restore "$SOLUTION_PATH"
+
+      - name: Build solution
+        run: dotnet build "$SOLUTION_PATH" --configuration "$CONFIGURATION" --no-restore
+
+      - name: Run .NET tests
+        run: >-
+          dotnet test "$SOLUTION_PATH" --configuration "$CONFIGURATION" --no-build --no-restore
+          --logger "trx;LogFilePrefix=sonicdesktoprelay"
+          --results-directory TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-linux
+          path: TestResults/*.trx
+          if-no-files-found: ignore
+          retention-days: 14
+
+  build-and-test-macos:
+    name: Build and test (macOS, disabled)
+    if: vars.ENABLE_CROSS_PLATFORM_CI == 'true'
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore dependencies
+        run: dotnet restore "$SOLUTION_PATH"
+
+      - name: Build solution
+        run: dotnet build "$SOLUTION_PATH" --configuration "$CONFIGURATION" --no-restore
+
+      - name: Run .NET tests
+        run: >-
+          dotnet test "$SOLUTION_PATH" --configuration "$CONFIGURATION" --no-build --no-restore
+          --logger "trx;LogFilePrefix=sonicdesktoprelay"
+          --results-directory TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-macos
+          path: TestResults/*.trx
+          if-no-files-found: ignore
+          retention-days: 14
+
+  package-release:
+    name: Package release assets
+    needs: build-and-test
+    if: github.event_name != 'pull_request'
+    runs-on: windows-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    outputs:
+      tag_name: ${{ steps.metadata.outputs.tag_name }}
+      display_version: ${{ steps.metadata.outputs.display_version }}
+      asset_version: ${{ steps.metadata.outputs.asset_version }}
+      is_prerelease: ${{ steps.metadata.outputs.is_prerelease }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Resolve package metadata
+        id: metadata
+        shell: pwsh
+        run: |
+          $manualVersion = '${{ github.event.inputs.release_version }}'
+          $runNumber = '${{ github.run_number }}'
+
+          if ('${{ github.ref_type }}' -eq 'tag') {
+            $tagName = '${{ github.ref_name }}'
+          }
+          elseif (-not [string]::IsNullOrWhiteSpace($manualVersion)) {
+            $tagName = if ($manualVersion.StartsWith('v')) { $manualVersion } else { "v$manualVersion" }
+          }
+          else {
+            # The marker tag. Numbered from the run number rather than from the newest
+            # existing marker: run numbers are monotonic and cannot collide when two
+            # builds of main overlap, which "latest marker + 1" would.
+            $tagName = "dev-$runNumber"
+          }
+
+          $displayVersion = if ($tagName.StartsWith('v')) { $tagName.Substring(1) } else { "0.0.$runNumber" }
+          $assetVersion = $displayVersion -replace '[^0-9A-Za-z.-]', '-'
+          $isPrerelease = if ($displayVersion -match '-' -or -not $tagName.StartsWith('v')) { 'true' } else { 'false' }
+
+          "tag_name=$tagName" >> $env:GITHUB_OUTPUT
+          "display_version=$displayVersion" >> $env:GITHUB_OUTPUT
+          "asset_version=$assetVersion" >> $env:GITHUB_OUTPUT
+          "is_prerelease=$isPrerelease" >> $env:GITHUB_OUTPUT
+
+      - name: Restore dependencies
+        run: dotnet restore $env:APP_PROJECT_PATH --runtime $env:RUNTIME_ID
+
+      - name: Publish portable folder
+        shell: pwsh
+        run: |
+          $publishDir = Join-Path $env:GITHUB_WORKSPACE 'artifacts/publish/portable'
+
+          dotnet publish $env:APP_PROJECT_PATH `
+            --configuration $env:CONFIGURATION `
+            --runtime $env:RUNTIME_ID `
+            --self-contained true `
+            --no-restore `
+            -p:PublishSingleFile=false `
+            -p:DebugType=embedded `
+            -o $publishDir
+
+          @"
+          product=SonicDesktopRelay
+          version=${{ steps.metadata.outputs.display_version }}
+          commit=${{ github.sha }}
+          runtime=$env:RUNTIME_ID
+          configuration=$env:CONFIGURATION
+          builtAtUtc=$((Get-Date).ToUniversalTime().ToString('O'))
+          "@ | Set-Content -Path (Join-Path $publishDir 'BUILD-INFO.txt') -Encoding UTF8
+
+      - name: Publish single-file EXE
+        shell: pwsh
+        run: |
+          $singleFileDir = Join-Path $env:GITHUB_WORKSPACE 'artifacts/publish/single-file'
+
+          # Portable EXE asset. It stays per-user and creates no services, drivers,
+          # firewall rules, or admin-only writes.
+          dotnet publish $env:APP_PROJECT_PATH `
+            --configuration $env:CONFIGURATION `
+            --runtime $env:RUNTIME_ID `
+            --self-contained true `
+            --no-restore `
+            -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:EnableCompressionInSingleFile=true `
+            -p:DebugType=embedded `
+            -o $singleFileDir
+
+      # No MSI or setup bundle yet: packaging/*.wxs arrives with phase 4 of the design
+      # (docs/superpowers/specs/2026-08-23-sonicdesktoprelay-design.md). When it does, add a
+      # WiX step here pinned to v5 — v6+ requires accepting the Open Source Maintenance Fee
+      # EULA, which fails an unattended CI install.
+      - name: Assemble release assets and checksums
+        shell: pwsh
+        run: |
+          $assetVersion = '${{ steps.metadata.outputs.asset_version }}'
+          $distDir = Join-Path $env:GITHUB_WORKSPACE 'artifacts/release'
+          New-Item -ItemType Directory -Force -Path $distDir | Out-Null
+
+          $zipPath = Join-Path $distDir "$env:PRODUCT_NAME-$env:RUNTIME_ID-$assetVersion.zip"
+          Compress-Archive `
+            -Path (Join-Path $env:GITHUB_WORKSPACE 'artifacts/publish/portable/*') `
+            -DestinationPath $zipPath `
+            -CompressionLevel Optimal -Force
+
+          Copy-Item `
+            -Path (Join-Path $env:GITHUB_WORKSPACE "artifacts/publish/single-file/$env:APP_EXE_NAME") `
+            -Destination (Join-Path $distDir "$env:PRODUCT_NAME-$env:RUNTIME_ID-$assetVersion.exe")
+
+          Get-ChildItem -Path $distDir -File |
+            Where-Object { $_.Extension -in @('.zip', '.exe') } |
+            ForEach-Object {
+              $hash = Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256
+              "$($hash.Hash)  $($_.Name)"
+            } | Set-Content -LiteralPath (Join-Path $distDir 'checksums-sha256.txt') -Encoding ASCII
+
+          @"
+          # SonicDesktopRelay ${{ steps.metadata.outputs.display_version }}
+
+          Built from ``${{ github.sha }}`` for ``$env:RUNTIME_ID``.
+
+          Assets:
+          - ``$env:PRODUCT_NAME-$env:RUNTIME_ID-$assetVersion.zip``: portable folder distribution.
+          - ``$env:PRODUCT_NAME-$env:RUNTIME_ID-$assetVersion.exe``: portable single-file executable.
+
+          Notes:
+          - Windows only. The app registers itself on first run; there is no sign-in.
+          - An installer is not built yet; both assets are portable and per-user.
+          - Packages are currently unsigned.
+          "@ | Set-Content -Path (Join-Path $distDir 'RELEASE-NOTES.md') -Encoding UTF8
+
+      - name: Upload packaged assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release-assets-${{ steps.metadata.outputs.asset_version }}
+          path: artifacts/release/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tagName = '${{ steps.metadata.outputs.tag_name }}'
+          $releaseTitle = 'SonicDesktopRelay ${{ steps.metadata.outputs.display_version }}'
+          $notesPath = Join-Path $env:GITHUB_WORKSPACE 'artifacts/release/RELEASE-NOTES.md'
+          $assetPaths = @(
+            Get-ChildItem -Path 'artifacts/release' -File |
+              Where-Object { $_.Extension -in @('.zip', '.exe', '.txt') } |
+              Select-Object -ExpandProperty FullName
+          )
+
+          # --latest is what makes the newest marker tag the release people actually land on.
+          # Without it a dev-N release is created as a prerelease and GitHub keeps pointing
+          # "Latest" at some older v* tag, so the freshest build stays invisible.
+          $extraArguments = @('--target', '${{ github.sha }}', '--notes-file', $notesPath, '--latest')
+
+          if ('${{ steps.metadata.outputs.is_prerelease }}' -eq 'true') {
+            $extraArguments += '--prerelease'
+          }
+
+          # Retries transient GitHub API 5xx responses instead of failing a build whose
+          # packages were all produced successfully.
+          ./.github/scripts/Publish-GitHubRelease.ps1 `
+            -Tag $tagName `
+            -Title $releaseTitle `
+            -Asset $assetPaths `
+            -ExtraArgument $extraArguments
