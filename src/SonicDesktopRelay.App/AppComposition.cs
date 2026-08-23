@@ -3,6 +3,8 @@ using System.Runtime.Versioning;
 using SonicDesktopRelay.ApiClient;
 using SonicDesktopRelay.Core;
 using SonicDesktopRelay.Core.Identity;
+using SonicDesktopRelay.Media;
+using SonicDesktopRelay.Media.Windows;
 using SonicDesktopRelay.Presentation;
 using SonicDesktopRelay.Signaling;
 
@@ -12,7 +14,7 @@ namespace SonicDesktopRelay.App;
 /// The one place that knows about concrete implementations. Everything below this file talks
 /// to interfaces, which is what lets the whole app be tested without Windows or a network.
 /// </summary>
-[SupportedOSPlatform("windows")]
+[SupportedOSPlatform("windows10.0.19041.0")]
 public sealed class AppComposition
 {
     /// <param name="deviceName">
@@ -32,12 +34,24 @@ public sealed class AppComposition
         {
             BaseAddress = settings.BaseAddress
         };
+
+        // The publish host needs the very connection the runtime is using — offers and ICE go
+        // out over the same socket the answers come back on — so the factory hands a reference
+        // to whatever it most recently built.
+        ISignalingConnection? current = null;
+        PublishHost = new RtcVideoPublishHost(new IceApiClient(sessionHttp), () => current);
+
         Runtime = new SessionRuntime(
             new SessionApiAdapter(new SessionApiClient(sessionHttp)),
-            () => new SignalingConnection(
-                new ClientWebSocketAdapter(),
-                settings,
-                ct => Identity.GetAccessTokenAsync(deviceName, ct)));
+            () =>
+            {
+                current = new SignalingConnection(
+                    new ClientWebSocketAdapter(),
+                    settings,
+                    ct => Identity.GetAccessTokenAsync(deviceName, ct));
+                return current;
+            },
+            PublishHost);
     }
 
     public BackendSettings Settings { get; }
@@ -45,6 +59,10 @@ public sealed class AppComposition
     public DeviceIdentityService Identity { get; }
 
     public SessionRuntime Runtime { get; }
+
+    public RtcVideoPublishHost PublishHost { get; }
+
+    public IMonitorEnumerator Monitors { get; } = new MonitorEnumerator();
 }
 
 /// <summary>Attaches the DeviceBearer token to every call, refreshing it before it lapses.</summary>

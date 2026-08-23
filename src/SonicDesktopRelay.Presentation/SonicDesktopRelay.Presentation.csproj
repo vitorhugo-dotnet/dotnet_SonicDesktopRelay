@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\SonicDesktopRelay.Core\SonicDesktopRelay.Core.csproj" />
     <ProjectReference Include="..\SonicDesktopRelay.Signaling\SonicDesktopRelay.Signaling.csproj" />
+    <ProjectReference Include="..\SonicDesktopRelay.Media\SonicDesktopRelay.Media.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

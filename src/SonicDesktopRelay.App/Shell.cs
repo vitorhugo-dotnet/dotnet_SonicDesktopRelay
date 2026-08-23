@@ -4,6 +4,8 @@ using System.Runtime.CompilerServices;
 using System.Runtime.Versioning;
 using Avalonia.Threading;
 using SonicDesktopRelay.Core;
+using SonicDesktopRelay.Media;
+using SonicDesktopRelay.Media.Windows;
 using SonicDesktopRelay.Presentation;
 
 namespace SonicDesktopRelay.App;
@@ -14,7 +16,7 @@ namespace SonicDesktopRelay.App;
 /// backend, the device name, and the actions the buttons invoke. The composition root is
 /// built lazily because the backend address can be wrong until someone fixes it in Settings.
 /// </summary>
-[SupportedOSPlatform("windows")]
+[SupportedOSPlatform("windows10.0.19041.0")]
 public sealed class Shell : INotifyPropertyChanged
 {
     private const int DefaultMaxViewers = 3;
@@ -23,10 +25,13 @@ public sealed class Shell : INotifyPropertyChanged
     private string _backendAddress = "https://localhost:5001";
     private string _deviceName = Environment.MachineName;
     private string? _shellError;
+    private MonitorInfo? _selectedMonitor;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
     public MainWindowViewModel ViewModel { get; } = new();
+
+    public Shell() => RefreshMonitors();
 
     /// <summary>The Diagnostics page's whole content: the snapshots the runtime has published.</summary>
     public ObservableCollection<string> Diagnostics { get; } = [];
@@ -74,11 +79,62 @@ public sealed class Shell : INotifyPropertyChanged
         }
     }
 
+    /// <summary>The monitors this machine can share, newest enumeration each time it is read.</summary>
+    public ObservableCollection<MonitorInfo> Monitors { get; } = [];
+
+    public MonitorInfo? SelectedMonitor
+    {
+        get => _selectedMonitor;
+        set
+        {
+            if (Nullable.Equals(_selectedMonitor, value)) return;
+            _selectedMonitor = value;
+            Raise();
+        }
+    }
+
+    /// <summary>What the media stack is actually doing, for the Diagnostics page.</summary>
+    public string MediaStatusText
+    {
+        get
+        {
+            var host = _composition?.PublishHost;
+            if (host?.StartFailure is { } failure) return $"Media failed to start: {failure}";
+            if (host?.EncoderName is not { } encoder) return "Encoder: not started";
+
+            var snapshot = ViewModel.Snapshot;
+            var rejected = host.EncoderRejections.Count == 0
+                ? "none rejected"
+                : string.Join("; ", host.EncoderRejections);
+            return $"Encoder: {encoder} — {snapshot.VideoHeight}p{snapshot.FramesPerSecond}, "
+                   + $"{snapshot.ViewerCount} viewer(s), FFmpeg at {FFmpegLoader.LibraryPath ?? "not found"} "
+                   + $"({rejected})";
+        }
+    }
+
+    /// <summary>Refreshes <see cref="Monitors"/> from the OS and keeps a sensible selection.</summary>
+    public void RefreshMonitors()
+    {
+        var monitors = new MonitorEnumerator().List();
+        Monitors.Clear();
+        foreach (var monitor in monitors) Monitors.Add(monitor);
+
+        if (SelectedMonitor is { } selected && monitors.Any(x => x.Id == selected.Id)) return;
+        SelectedMonitor = monitors.FirstOrDefault(x => x.IsPrimary, monitors.FirstOrDefault());
+    }
+
     public async Task ShareAsync(CancellationToken ct)
     {
         var runtime = TryGetRuntime();
         if (runtime is null) return;
-        await GuardAsync(() => runtime.StartSharingAsync(DefaultMaxViewers, ct));
+
+        if (SelectedMonitor is not { } monitor)
+        {
+            ShellError = "No monitor is available to share.";
+            return;
+        }
+
+        await GuardAsync(() => runtime.StartSharingAsync(monitor, DefaultMaxViewers, ct));
     }
 
     public async Task WatchAsync(string code, CancellationToken ct)
@@ -134,6 +190,7 @@ public sealed class Shell : INotifyPropertyChanged
     private void OnSnapshot(SessionSnapshot snapshot) => Dispatcher.UIThread.Post(() =>
     {
         ViewModel.Apply(snapshot);
+        Raise(nameof(MediaStatusText));
         Diagnostics.Insert(0,
             $"{DateTimeOffset.Now:HH:mm:ss}  {snapshot.Phase}  signaling={snapshot.Signaling}  " +
             $"session={snapshot.SessionId?.ToString() ?? "-"}  viewers={snapshot.ViewerCount}");

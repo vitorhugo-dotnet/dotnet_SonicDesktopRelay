@@ -10,8 +10,16 @@
                    FontSize="{StaticResource FontSizeLg}"
                    Foreground="{StaticResource TextPrimaryBrush}" />
 
+        <SelectableTextBlock DockPanel.Dock="Top"
+                             Text="{Binding MediaStatusText}"
+                             Margin="0,0,0,8"
+                             TextWrapping="Wrap"
+                             FontFamily="Consolas, monospace"
+                             FontSize="{StaticResource FontSizeSm}"
+                             Foreground="{StaticResource TextPrimaryBrush}" />
+
         <TextBlock DockPanel.Dock="Top"
-                   Text="Every snapshot the session runtime has published, newest first. Media metrics arrive with the media pipeline."
+                   Text="Every snapshot the session runtime has published, newest first."
                    Margin="0,0,0,16"
                    TextWrapping="Wrap"
                    FontSize="{StaticResource FontSizeSm}"

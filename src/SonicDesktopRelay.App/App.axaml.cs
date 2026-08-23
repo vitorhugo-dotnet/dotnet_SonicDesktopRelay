@@ -5,7 +5,7 @@ using Avalonia.Markup.Xaml;
 
 namespace SonicDesktopRelay.App;
 
-[SupportedOSPlatform("windows")]
+[SupportedOSPlatform("windows10.0.19041.0")]
 public partial class App : Application
 {
     public override void Initialize()

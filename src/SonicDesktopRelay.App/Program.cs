@@ -3,7 +3,7 @@ using System;
 
 namespace SonicDesktopRelay.App;
 
-[System.Runtime.Versioning.SupportedOSPlatform("windows")]
+[System.Runtime.Versioning.SupportedOSPlatform("windows10.0.19041.0")]
 class Program
 {
     // Initialization code. Don't use any Avalonia, third-party APIs or any

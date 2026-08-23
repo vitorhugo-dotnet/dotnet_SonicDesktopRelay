@@ -5,7 +5,7 @@ using AppPage = SonicDesktopRelay.Presentation.Page;
 
 namespace SonicDesktopRelay.App.Views;
 
-[SupportedOSPlatform("windows")]
+[SupportedOSPlatform("windows10.0.19041.0")]
 public partial class MainWindow : Window
 {
     public MainWindow()

@@ -1,3 +1,5 @@
+using System.Text.Json;
+using SonicDesktopRelay.Media;
 using SonicDesktopRelay.Signaling;
 
 namespace SonicDesktopRelay.Presentation;
@@ -7,7 +9,10 @@ namespace SonicDesktopRelay.Presentation;
 /// because in this phase a device shares or watches, never both — and one machine is what
 /// keeps the Diagnostics page honest instead of inventing a second version of the truth.
 /// </summary>
-public sealed class SessionRuntime(ISessionApi api, Func<ISignalingConnection> connectionFactory)
+public sealed class SessionRuntime(
+    ISessionApi api,
+    Func<ISignalingConnection> connectionFactory,
+    IVideoPublishHost? publishHost = null)
 {
     private ISignalingConnection? _connection;
     private bool _isOwner;
@@ -16,7 +21,7 @@ public sealed class SessionRuntime(ISessionApi api, Func<ISignalingConnection> c
 
     public event Action<SessionSnapshot>? Changed;
 
-    public async Task StartSharingAsync(int maxViewers, CancellationToken ct)
+    public async Task StartSharingAsync(MonitorInfo monitor, int maxViewers, CancellationToken ct)
     {
         RequireIdle();
         Publish(Snapshot with { Phase = SessionPhase.Preparing, Error = null });
@@ -25,8 +30,13 @@ public sealed class SessionRuntime(ISessionApi api, Func<ISignalingConnection> c
             var created = await api.CreateScreenShareAsync(maxViewers, ct);
             _isOwner = true;
             await AttachAsync(created.SessionId, ct);
+
+            if (publishHost is not null) await publishHost.StartAsync(monitor, ct);
+
+            var quality = VideoQuality.Default;
             Publish(new SessionSnapshot(SessionPhase.Sharing, created.Code, created.SessionId, 0,
-                _connection!.State, null));
+                _connection!.State, null, publishHost?.EncoderName, quality.FramesPerSecond,
+                quality.ScaleFor(monitor.Width, monitor.Height).Height));
         }
         catch (SessionApiFailure failure)
         {
@@ -55,6 +65,10 @@ public sealed class SessionRuntime(ISessionApi api, Func<ISignalingConnection> c
     {
         if (Snapshot.Phase == SessionPhase.Idle) return;
         Publish(Snapshot with { Phase = SessionPhase.Ending });
+
+        // Capture stops before the session ends: the last thing a viewer should see is the
+        // screen going away, not frames arriving for a session the server has already closed.
+        if (publishHost is not null) await publishHost.StopAsync();
 
         // Only the publishing device may end a session for everyone; a viewer leaving simply
         // drops its own connection, and calling end as a viewer would be a 403 at best.
@@ -99,19 +113,68 @@ public sealed class SessionRuntime(ISessionApi api, Func<ISignalingConnection> c
 
     private void OnFrame(SignalingEnvelope envelope)
     {
+        var sharing = Snapshot.Phase == SessionPhase.Sharing;
+
         switch (envelope.Type)
         {
-            case SignalingMessageTypes.SessionJoined when Snapshot.Phase == SessionPhase.Sharing:
+            case SignalingMessageTypes.SessionJoined when sharing:
                 Publish(Snapshot with { ViewerCount = Snapshot.ViewerCount + 1 });
+                AddViewer(envelope);
                 break;
-            case SignalingMessageTypes.SessionLeft when Snapshot.Phase == SessionPhase.Sharing:
+
+            case SignalingMessageTypes.ParticipantReconnected when sharing:
+                Publish(Snapshot with { ViewerCount = Snapshot.ViewerCount + 1 });
+                AddViewer(envelope);
+                break;
+
+            case SignalingMessageTypes.SessionLeft when sharing:
+                Publish(Snapshot with { ViewerCount = Math.Max(0, Snapshot.ViewerCount - 1) });
+                if (publishHost is not null && TryReadParticipant(envelope) is { } left)
+                    _ = publishHost.RemoveViewerAsync(left);
+                break;
+
+            case SignalingMessageTypes.ParticipantDisconnected when sharing:
+                // "Transiently unreachable", not "gone": the server holds the participant for
+                // its grace period, and tearing the peer down here would force a full
+                // renegotiation for a viewer that is about to come back.
                 Publish(Snapshot with { ViewerCount = Math.Max(0, Snapshot.ViewerCount - 1) });
                 break;
+
+            case SignalingMessageTypes.WebRtcAnswer when sharing:
+            case SignalingMessageTypes.WebRtcIceCandidate when sharing:
+                if (publishHost is not null)
+                    _ = publishHost.HandleSignalingAsync(envelope, CancellationToken.None);
+                break;
+
             case SignalingMessageTypes.SessionEnded:
+                if (publishHost is not null) _ = publishHost.StopAsync();
                 _ = DetachAsync();
                 Publish(SessionSnapshot.Idle);
                 break;
         }
+    }
+
+    private void AddViewer(SignalingEnvelope envelope)
+    {
+        if (publishHost is null) return;
+        if (TryReadParticipant(envelope) is not { } participantId) return;
+        _ = publishHost.AddViewerAsync(participantId, CancellationToken.None);
+    }
+
+    // The server names the participant in the payload; `from` is only set on relayed
+    // peer-to-peer frames, so both are checked before giving up.
+    private static Guid? TryReadParticipant(SignalingEnvelope envelope)
+    {
+        if (envelope.Payload is { } payload
+            && payload.ValueKind == JsonValueKind.Object
+            && payload.TryGetProperty("participantId", out var element)
+            && element.ValueKind == JsonValueKind.String
+            && Guid.TryParse(element.GetString(), out var participantId))
+        {
+            return participantId;
+        }
+
+        return envelope.From;
     }
 
     private void OnSignalingState(SignalingState state) => Publish(Snapshot with { Signaling = state });

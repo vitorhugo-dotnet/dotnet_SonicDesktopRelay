@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:app="clr-namespace:SonicDesktopRelay.App"
+             xmlns:media="clr-namespace:SonicDesktopRelay.Media;assembly=SonicDesktopRelay.Media"
              x:Class="SonicDesktopRelay.App.Views.ShareView"
              x:DataType="app:Shell">
     <StackPanel Margin="{StaticResource PagePadding}" Spacing="{StaticResource SpaceMd}">
@@ -12,8 +13,16 @@
             <TextBlock Text="Monitor"
                        FontSize="{StaticResource FontSizeSm}"
                        Foreground="{StaticResource TextSecondaryBrush}" />
-            <ComboBox Name="MonitorPicker" IsEnabled="False" SelectedIndex="0" Width="360">
-                <ComboBoxItem Content="Primary monitor (capture arrives in the next phase)" />
+            <ComboBox Name="MonitorPicker"
+                      Width="360"
+                      ItemsSource="{Binding Monitors}"
+                      SelectedItem="{Binding SelectedMonitor}"
+                      IsEnabled="{Binding ViewModel.CanShare}">
+                <ComboBox.ItemTemplate>
+                    <DataTemplate x:DataType="media:MonitorInfo">
+                        <TextBlock Text="{Binding Name}" />
+                    </DataTemplate>
+                </ComboBox.ItemTemplate>
             </ComboBox>
         </StackPanel>
 

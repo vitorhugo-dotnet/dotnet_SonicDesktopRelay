@@ -35,6 +35,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
     }
 
+    /// <summary>The snapshot this view model is projecting, for callers that need the raw values.</summary>
+    public SessionSnapshot Snapshot => _snapshot;
+
     public bool CanShare => _snapshot.Phase is SessionPhase.Idle or SessionPhase.Failed;
 
     public bool CanWatch => CanShare;
@@ -58,6 +61,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public void Apply(SessionSnapshot snapshot)
     {
         _snapshot = snapshot;
+        Raise(nameof(Snapshot));
         Raise(nameof(CanShare));
         Raise(nameof(CanWatch));
         Raise(nameof(CanStop));

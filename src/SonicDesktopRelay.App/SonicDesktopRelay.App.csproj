@@ -1,7 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0</TargetFramework>
+    <!-- The App is the composition root and the only place that touches Media.Windows.
+         MSBuild cannot reference a net10.0-windows project from a net10.0 one, and this
+         executable is Windows-only by design (WGC capture, DPAPI credential store). -->
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
     <Nullable>enable</Nullable>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AssemblyTitle>SonicDesktopRelay</AssemblyTitle>
@@ -23,6 +27,8 @@
   <ItemGroup>
     <ProjectReference Include="..\SonicDesktopRelay.ApiClient\SonicDesktopRelay.ApiClient.csproj" />
     <ProjectReference Include="..\SonicDesktopRelay.Core\SonicDesktopRelay.Core.csproj" />
+    <ProjectReference Include="..\SonicDesktopRelay.Media.Windows\SonicDesktopRelay.Media.Windows.csproj" />
+    <ProjectReference Include="..\SonicDesktopRelay.Rtc\SonicDesktopRelay.Rtc.csproj" />
     <ProjectReference Include="..\SonicDesktopRelay.Presentation\SonicDesktopRelay.Presentation.csproj" />
     <ProjectReference Include="..\SonicDesktopRelay.Signaling\SonicDesktopRelay.Signaling.csproj" />
   </ItemGroup>

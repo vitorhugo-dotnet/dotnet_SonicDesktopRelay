@@ -58,3 +58,11 @@ public static class ApiErrorCodes
     public const string DeviceTypeNotAllowed = "device_type_not_allowed";
     public const string InvalidSessionMode = "invalid_session_mode";
 }
+
+/// <summary>
+/// One ICE server. <c>Urls</c> is an array in the WebRTC configuration dictionary, and the
+/// backend follows that shape even when it only ever returns one entry.
+/// </summary>
+public sealed record IceServerResponse(string[] Urls, string? Username, string? Credential);
+
+public sealed record IceServersResponse(IceServerResponse[] IceServers);

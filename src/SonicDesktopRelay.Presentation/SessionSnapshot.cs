@@ -1,3 +1,4 @@
+using SonicDesktopRelay.Media;
 using SonicDesktopRelay.Signaling;
 
 namespace SonicDesktopRelay.Presentation;
@@ -23,7 +24,11 @@ public sealed record SessionSnapshot(
     Guid? SessionId,
     int ViewerCount,
     SignalingState Signaling,
-    string? Error)
+    string? Error,
+    /// <summary>The codec that actually opened, e.g. "h264_nvenc". Null when not sharing.</summary>
+    string? EncoderName = null,
+    int FramesPerSecond = 0,
+    int VideoHeight = 0)
 {
     public static SessionSnapshot Idle { get; } =
         new(SessionPhase.Idle, null, null, 0, SignalingState.Disconnected, null);
@@ -49,4 +54,23 @@ public interface ISessionApi
     Task<Guid> JoinAsync(string code, CancellationToken ct);
 
     Task EndAsync(Guid sessionId, CancellationToken ct);
+}
+
+/// <summary>
+/// What the runtime needs from the media stack, declared here so Presentation never references
+/// Rtc or Media.Windows. The App composes the real one.
+/// </summary>
+public interface IVideoPublishHost : IAsyncDisposable
+{
+    string? EncoderName { get; }
+
+    Task StartAsync(MonitorInfo monitor, CancellationToken ct);
+
+    Task StopAsync();
+
+    Task AddViewerAsync(Guid participantId, CancellationToken ct);
+
+    Task RemoveViewerAsync(Guid participantId);
+
+    Task HandleSignalingAsync(SignalingEnvelope envelope, CancellationToken ct);
 }
