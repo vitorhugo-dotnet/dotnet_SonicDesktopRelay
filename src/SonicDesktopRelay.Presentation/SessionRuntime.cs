@@ -1,0 +1,137 @@
+using SonicDesktopRelay.Signaling;
+
+namespace SonicDesktopRelay.Presentation;
+
+/// <summary>
+/// The single answer to "what is this app doing right now". One machine covers both roles,
+/// because in this phase a device shares or watches, never both — and one machine is what
+/// keeps the Diagnostics page honest instead of inventing a second version of the truth.
+/// </summary>
+public sealed class SessionRuntime(ISessionApi api, Func<ISignalingConnection> connectionFactory)
+{
+    private ISignalingConnection? _connection;
+    private bool _isOwner;
+
+    public SessionSnapshot Snapshot { get; private set; } = SessionSnapshot.Idle;
+
+    public event Action<SessionSnapshot>? Changed;
+
+    public async Task StartSharingAsync(int maxViewers, CancellationToken ct)
+    {
+        RequireIdle();
+        Publish(Snapshot with { Phase = SessionPhase.Preparing, Error = null });
+        try
+        {
+            var created = await api.CreateScreenShareAsync(maxViewers, ct);
+            _isOwner = true;
+            await AttachAsync(created.SessionId, ct);
+            Publish(new SessionSnapshot(SessionPhase.Sharing, created.Code, created.SessionId, 0,
+                _connection!.State, null));
+        }
+        catch (SessionApiFailure failure)
+        {
+            await FailAsync(failure.Code);
+        }
+    }
+
+    public async Task StartWatchingAsync(string code, CancellationToken ct)
+    {
+        RequireIdle();
+        Publish(Snapshot with { Phase = SessionPhase.Joining, Error = null });
+        try
+        {
+            var sessionId = await api.JoinAsync(code, ct);
+            _isOwner = false;
+            await AttachAsync(sessionId, ct);
+            Publish(new SessionSnapshot(SessionPhase.Watching, null, sessionId, 0, _connection!.State, null));
+        }
+        catch (SessionApiFailure failure)
+        {
+            await FailAsync(failure.Code);
+        }
+    }
+
+    public async Task StopAsync(CancellationToken ct)
+    {
+        if (Snapshot.Phase == SessionPhase.Idle) return;
+        Publish(Snapshot with { Phase = SessionPhase.Ending });
+
+        // Only the publishing device may end a session for everyone; a viewer leaving simply
+        // drops its own connection, and calling end as a viewer would be a 403 at best.
+        if (_isOwner && Snapshot.SessionId is { } sessionId)
+        {
+            try
+            {
+                await api.EndAsync(sessionId, ct);
+            }
+            catch (SessionApiFailure)
+            {
+                // The session may already be over. Stopping locally must still succeed.
+            }
+        }
+
+        await DetachAsync();
+        Publish(SessionSnapshot.Idle);
+    }
+
+    private async Task AttachAsync(Guid sessionId, CancellationToken ct)
+    {
+        var connection = connectionFactory();
+        connection.FrameReceived += OnFrame;
+        _connection = connection;
+        await connection.StartAsync(sessionId, ct);
+
+        // Subscribed only after the initial connect: the state change that connecting itself
+        // produces is already reflected in the snapshot the caller is about to publish, and
+        // reacting to it here would emit a redundant intermediate snapshot to the UI.
+        connection.StateChanged += OnSignalingState;
+    }
+
+    private async Task DetachAsync()
+    {
+        if (_connection is null) return;
+        _connection.FrameReceived -= OnFrame;
+        _connection.StateChanged -= OnSignalingState;
+        await _connection.DisposeAsync();
+        _connection = null;
+        _isOwner = false;
+    }
+
+    private void OnFrame(SignalingEnvelope envelope)
+    {
+        switch (envelope.Type)
+        {
+            case SignalingMessageTypes.SessionJoined when Snapshot.Phase == SessionPhase.Sharing:
+                Publish(Snapshot with { ViewerCount = Snapshot.ViewerCount + 1 });
+                break;
+            case SignalingMessageTypes.SessionLeft when Snapshot.Phase == SessionPhase.Sharing:
+                Publish(Snapshot with { ViewerCount = Math.Max(0, Snapshot.ViewerCount - 1) });
+                break;
+            case SignalingMessageTypes.SessionEnded:
+                _ = DetachAsync();
+                Publish(SessionSnapshot.Idle);
+                break;
+        }
+    }
+
+    private void OnSignalingState(SignalingState state) => Publish(Snapshot with { Signaling = state });
+
+    private async Task FailAsync(string code)
+    {
+        await DetachAsync();
+        Publish(new SessionSnapshot(SessionPhase.Failed, null, null, 0, SignalingState.Disconnected, code));
+    }
+
+    private void RequireIdle()
+    {
+        if (Snapshot.Phase is SessionPhase.Idle or SessionPhase.Failed) return;
+        throw new InvalidOperationException(
+            $"Cannot start a session while the runtime is {Snapshot.Phase}. Stop the current one first.");
+    }
+
+    private void Publish(SessionSnapshot snapshot)
+    {
+        Snapshot = snapshot;
+        Changed?.Invoke(snapshot);
+    }
+}
