@@ -24,3 +24,37 @@ public static class DeviceConstants
     public const string DeviceType = "windows_desktop";
     public const string Platform = "windows";
 }
+
+public sealed record CreateSessionRequest(int MaxViewers, string Mode);
+
+public sealed record JoinSessionRequest(string Code);
+
+/// <summary>
+/// <c>Code</c> is present only on the responses that issue one (create and rotate); reading a
+/// session back never re-exposes it.
+/// </summary>
+public sealed record SessionResponse(
+    Guid Id,
+    Guid SourceDeviceId,
+    string Status,
+    string Mode,
+    int MaxViewers,
+    DateTimeOffset CodeExpiresAt,
+    string? Code);
+
+public sealed record ParticipantResponse(Guid ParticipantId, string Role, string Status, bool IsSelf);
+
+public sealed record ParticipantsResponse(Guid SessionId, string Mode, ParticipantResponse[] Participants);
+
+public static class SessionModes
+{
+    public const string ScreenShare = "screen_share";
+}
+
+public static class ApiErrorCodes
+{
+    public const string InvalidCode = "invalid_code";
+    public const string NotPaired = "not_paired";
+    public const string DeviceTypeNotAllowed = "device_type_not_allowed";
+    public const string InvalidSessionMode = "invalid_session_mode";
+}
