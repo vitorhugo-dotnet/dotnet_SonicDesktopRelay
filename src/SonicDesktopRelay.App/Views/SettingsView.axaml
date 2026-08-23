@@ -1,0 +1,37 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:app="clr-namespace:SonicDesktopRelay.App"
+             x:Class="SonicDesktopRelay.App.Views.SettingsView"
+             x:DataType="app:Shell">
+    <StackPanel Margin="{StaticResource PagePadding}" Spacing="{StaticResource SpaceMd}">
+        <TextBlock Text="Settings"
+                   FontSize="{StaticResource FontSizeLg}"
+                   Foreground="{StaticResource TextPrimaryBrush}" />
+
+        <StackPanel Spacing="{StaticResource SpaceXs}">
+            <TextBlock Text="Backend address"
+                       FontSize="{StaticResource FontSizeSm}"
+                       Foreground="{StaticResource TextSecondaryBrush}" />
+            <TextBox Width="420"
+                     Text="{Binding BackendAddress, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+            <TextBlock Text="Enter an absolute http or https address, for example https://relay.example.com"
+                       IsVisible="{Binding !IsBackendAddressValid}"
+                       TextWrapping="Wrap"
+                       FontSize="{StaticResource FontSizeSm}"
+                       Foreground="{StaticResource DangerBrush}" />
+        </StackPanel>
+
+        <StackPanel Spacing="{StaticResource SpaceXs}">
+            <TextBlock Text="Device name"
+                       FontSize="{StaticResource FontSizeSm}"
+                       Foreground="{StaticResource TextSecondaryBrush}" />
+            <TextBox Width="420"
+                     Text="{Binding DeviceName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+        </StackPanel>
+
+        <TextBlock Text="This device registers itself the first time it reaches the backend. There is no sign-in."
+                   TextWrapping="Wrap"
+                   FontSize="{StaticResource FontSizeSm}"
+                   Foreground="{StaticResource TextSecondaryBrush}" />
+    </StackPanel>
+</UserControl>

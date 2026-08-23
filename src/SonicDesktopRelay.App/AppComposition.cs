@@ -1,0 +1,111 @@
+using System.Net;
+using System.Runtime.Versioning;
+using SonicDesktopRelay.ApiClient;
+using SonicDesktopRelay.Core;
+using SonicDesktopRelay.Core.Identity;
+using SonicDesktopRelay.Presentation;
+using SonicDesktopRelay.Signaling;
+
+namespace SonicDesktopRelay.App;
+
+/// <summary>
+/// The one place that knows about concrete implementations. Everything below this file talks
+/// to interfaces, which is what lets the whole app be tested without Windows or a network.
+/// </summary>
+[SupportedOSPlatform("windows")]
+public sealed class AppComposition
+{
+    public AppComposition(BackendSettings settings)
+    {
+        Settings = settings;
+        var store = new FileDeviceCredentialStore(FileDeviceCredentialStore.DefaultPath);
+        var deviceHttp = new HttpClient { BaseAddress = settings.BaseAddress };
+        var deviceApi = new DeviceApiClient(deviceHttp);
+        Identity = new DeviceIdentityService(store, deviceApi, TimeProvider.System);
+
+        var sessionHttp = new HttpClient(new BearerTokenHandler(Identity, Environment.MachineName))
+        {
+            BaseAddress = settings.BaseAddress
+        };
+        Runtime = new SessionRuntime(
+            new SessionApiAdapter(new SessionApiClient(sessionHttp)),
+            () => new SignalingConnection(
+                new ClientWebSocketAdapter(),
+                settings,
+                ct => Identity.GetAccessTokenAsync(Environment.MachineName, ct)));
+    }
+
+    public BackendSettings Settings { get; }
+
+    public DeviceIdentityService Identity { get; }
+
+    public SessionRuntime Runtime { get; }
+}
+
+/// <summary>Attaches the DeviceBearer token to every call, refreshing it before it lapses.</summary>
+internal sealed class BearerTokenHandler(DeviceIdentityService identity, string deviceName)
+    : DelegatingHandler(new HttpClientHandler())
+{
+    protected override async Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        var token = await identity.GetAccessTokenAsync(deviceName, cancellationToken);
+        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        var response = await base.SendAsync(request, cancellationToken);
+        if (response.StatusCode != HttpStatusCode.Unauthorized) return response;
+
+        // The proactive refresh missed — a clock skew or a credential rotation elsewhere.
+        // One retry with a fresh token, then the failure is real.
+        identity.Invalidate();
+        var retryToken = await identity.GetAccessTokenAsync(deviceName, cancellationToken);
+        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", retryToken);
+        return await base.SendAsync(request, cancellationToken);
+    }
+}
+
+/// <summary>Maps HTTP failures onto the presentation layer's own failure type.</summary>
+internal sealed class SessionApiAdapter(SessionApiClient client) : ISessionApi
+{
+    public async Task<CreatedSession> CreateScreenShareAsync(int maxViewers, CancellationToken ct)
+    {
+        try
+        {
+            var session = await client.CreateScreenShareAsync(maxViewers, ct);
+            return new CreatedSession(session.Id, session.Code
+                ?? throw new SessionApiFailure("no_code", "The backend created a session without a code."));
+        }
+        catch (ApiException e)
+        {
+            throw Translate(e);
+        }
+    }
+
+    public async Task<Guid> JoinAsync(string code, CancellationToken ct)
+    {
+        try
+        {
+            return (await client.JoinAsync(code, ct)).Id;
+        }
+        catch (ApiException e)
+        {
+            throw Translate(e);
+        }
+    }
+
+    public async Task EndAsync(Guid sessionId, CancellationToken ct)
+    {
+        try
+        {
+            await client.EndAsync(sessionId, ct);
+        }
+        catch (ApiException e)
+        {
+            throw Translate(e);
+        }
+    }
+
+    // The viewer-limit refusal is the one failure the API answers without a machine-readable
+    // code, so the status is what names it.
+    private static SessionApiFailure Translate(ApiException e) =>
+        new(e.ErrorCode ?? (e.StatusCode == HttpStatusCode.Conflict ? "session_full" : "unknown"), e.Message);
+}

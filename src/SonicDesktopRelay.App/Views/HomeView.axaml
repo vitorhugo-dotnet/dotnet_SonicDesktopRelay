@@ -1,0 +1,41 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:app="clr-namespace:SonicDesktopRelay.App"
+             x:Class="SonicDesktopRelay.App.Views.HomeView"
+             x:DataType="app:Shell">
+    <StackPanel Margin="{StaticResource PagePadding}" Spacing="{StaticResource SpaceMd}">
+        <TextBlock Text="Home"
+                   FontSize="{StaticResource FontSizeLg}"
+                   Foreground="{StaticResource TextPrimaryBrush}" />
+
+        <TextBlock Text="{Binding ViewModel.StatusText}"
+                   FontSize="{StaticResource FontSizeMd}"
+                   Foreground="{StaticResource TextSecondaryBrush}" />
+
+        <TextBlock Text="{Binding ShellError}"
+                   IsVisible="{Binding ShellError, Converter={x:Static ObjectConverters.IsNotNull}}"
+                   TextWrapping="Wrap"
+                   FontSize="{StaticResource FontSizeSm}"
+                   Foreground="{StaticResource DangerBrush}" />
+
+        <StackPanel Orientation="Horizontal" Spacing="{StaticResource SpaceSm}">
+            <Button Name="ShareButton"
+                    Content="Share my screen"
+                    IsEnabled="{Binding ViewModel.CanShare}"
+                    Click="OnShare" />
+            <Button Name="WatchButton"
+                    Content="Watch a screen"
+                    IsEnabled="{Binding ViewModel.CanWatch}"
+                    Click="OnWatch" />
+            <Button Name="StopButton"
+                    Content="Stop"
+                    IsEnabled="{Binding ViewModel.CanStop}"
+                    Click="OnStop" />
+        </StackPanel>
+
+        <TextBlock Text="No screen is captured in this build: sharing establishes the session and the signaling socket only."
+                   TextWrapping="Wrap"
+                   FontSize="{StaticResource FontSizeSm}"
+                   Foreground="{StaticResource TextSecondaryBrush}" />
+    </StackPanel>
+</UserControl>

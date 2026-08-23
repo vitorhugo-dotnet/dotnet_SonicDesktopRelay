@@ -1,0 +1,47 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:app="clr-namespace:SonicDesktopRelay.App"
+        xmlns:conv="clr-namespace:SonicDesktopRelay.App.Converters"
+        xmlns:views="clr-namespace:SonicDesktopRelay.App.Views"
+        mc:Ignorable="d" d:DesignWidth="900" d:DesignHeight="560"
+        x:Class="SonicDesktopRelay.App.Views.MainWindow"
+        x:DataType="app:Shell"
+        Width="900" Height="560"
+        Background="{StaticResource SurfaceBrush}"
+        Title="SonicDesktopRelay">
+    <Grid ColumnDefinitions="180,*">
+        <Border Grid.Column="0"
+                Background="{StaticResource RailBrush}"
+                BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="0,0,1,0"
+                Padding="{StaticResource RailPadding}">
+            <StackPanel Spacing="{StaticResource SpaceXs}">
+                <TextBlock Text="SonicDesktopRelay"
+                           Margin="8,8,8,16"
+                           TextWrapping="Wrap"
+                           FontSize="{StaticResource FontSizeMd}"
+                           Foreground="{StaticResource TextPrimaryBrush}" />
+                <Button Content="Home" Tag="Home" Click="OnNavigate" HorizontalAlignment="Stretch" />
+                <Button Content="Share" Tag="Share" Click="OnNavigate" HorizontalAlignment="Stretch" />
+                <Button Content="Watch" Tag="Watch" Click="OnNavigate" HorizontalAlignment="Stretch" />
+                <Button Content="Settings" Tag="Settings" Click="OnNavigate" HorizontalAlignment="Stretch" />
+                <Button Content="Diagnostics" Tag="Diagnostics" Click="OnNavigate" HorizontalAlignment="Stretch" />
+            </StackPanel>
+        </Border>
+
+        <Panel Grid.Column="1">
+            <views:HomeView IsVisible="{Binding ViewModel.CurrentPage,
+                Converter={x:Static conv:EnumEqualsConverter.Instance}, ConverterParameter=Home}" />
+            <views:ShareView IsVisible="{Binding ViewModel.CurrentPage,
+                Converter={x:Static conv:EnumEqualsConverter.Instance}, ConverterParameter=Share}" />
+            <views:WatchView IsVisible="{Binding ViewModel.CurrentPage,
+                Converter={x:Static conv:EnumEqualsConverter.Instance}, ConverterParameter=Watch}" />
+            <views:SettingsView IsVisible="{Binding ViewModel.CurrentPage,
+                Converter={x:Static conv:EnumEqualsConverter.Instance}, ConverterParameter=Settings}" />
+            <views:DiagnosticsView IsVisible="{Binding ViewModel.CurrentPage,
+                Converter={x:Static conv:EnumEqualsConverter.Instance}, ConverterParameter=Diagnostics}" />
+        </Panel>
+    </Grid>
+</Window>

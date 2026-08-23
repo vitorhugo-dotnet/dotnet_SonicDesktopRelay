@@ -1,0 +1,38 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:app="clr-namespace:SonicDesktopRelay.App"
+             x:Class="SonicDesktopRelay.App.Views.DiagnosticsView"
+             x:DataType="app:Shell">
+    <DockPanel Margin="{StaticResource PagePadding}">
+        <TextBlock DockPanel.Dock="Top"
+                   Text="Diagnostics"
+                   Margin="0,0,0,16"
+                   FontSize="{StaticResource FontSizeLg}"
+                   Foreground="{StaticResource TextPrimaryBrush}" />
+
+        <TextBlock DockPanel.Dock="Top"
+                   Text="Every snapshot the session runtime has published, newest first. Media metrics arrive with the media pipeline."
+                   Margin="0,0,0,16"
+                   TextWrapping="Wrap"
+                   FontSize="{StaticResource FontSizeSm}"
+                   Foreground="{StaticResource TextSecondaryBrush}" />
+
+        <Border Background="{StaticResource SurfaceRaisedBrush}"
+                BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="1"
+                CornerRadius="{StaticResource ControlCornerRadius}">
+            <ScrollViewer>
+                <ItemsControl ItemsSource="{Binding Diagnostics}" Margin="{StaticResource RailPadding}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="x:String">
+                            <SelectableTextBlock Text="{Binding}"
+                                                 FontFamily="Consolas, monospace"
+                                                 FontSize="{StaticResource FontSizeSm}"
+                                                 Foreground="{StaticResource TextSecondaryBrush}" />
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+        </Border>
+    </DockPanel>
+</UserControl>

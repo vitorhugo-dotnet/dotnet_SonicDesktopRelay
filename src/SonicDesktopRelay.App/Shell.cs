@@ -1,0 +1,140 @@
+using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Runtime.CompilerServices;
+using System.Runtime.Versioning;
+using Avalonia.Threading;
+using SonicDesktopRelay.Core;
+using SonicDesktopRelay.Presentation;
+
+namespace SonicDesktopRelay.App;
+
+/// <summary>
+/// What the window binds to: the plan's <see cref="MainWindowViewModel"/> for everything the
+/// UI may know about a session, plus the few things only the shell owns — the configured
+/// backend, the device name, and the actions the buttons invoke. The composition root is
+/// built lazily because the backend address can be wrong until someone fixes it in Settings.
+/// </summary>
+[SupportedOSPlatform("windows")]
+public sealed class Shell : INotifyPropertyChanged
+{
+    private const int DefaultMaxViewers = 3;
+
+    private AppComposition? _composition;
+    private string _backendAddress = "https://localhost:5001";
+    private string _deviceName = Environment.MachineName;
+    private string? _shellError;
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    public MainWindowViewModel ViewModel { get; } = new();
+
+    /// <summary>The Diagnostics page's whole content: the snapshots the runtime has published.</summary>
+    public ObservableCollection<string> Diagnostics { get; } = [];
+
+    public string BackendAddress
+    {
+        get => _backendAddress;
+        set
+        {
+            if (_backendAddress == value) return;
+            _backendAddress = value;
+            // A changed address invalidates the clients built against the old one.
+            _composition = null;
+            Raise();
+            Raise(nameof(IsBackendAddressValid));
+        }
+    }
+
+    public bool IsBackendAddressValid => BackendSettings.TryParse(_backendAddress) is not null;
+
+    public string DeviceName
+    {
+        get => _deviceName;
+        set
+        {
+            if (_deviceName == value) return;
+            _deviceName = value;
+            Raise();
+        }
+    }
+
+    /// <summary>A failure the runtime never saw, such as an unreachable backend.</summary>
+    public string? ShellError
+    {
+        get => _shellError;
+        private set
+        {
+            if (_shellError == value) return;
+            _shellError = value;
+            Raise();
+        }
+    }
+
+    public async Task ShareAsync(CancellationToken ct)
+    {
+        var runtime = TryGetRuntime();
+        if (runtime is null) return;
+        await GuardAsync(() => runtime.StartSharingAsync(DefaultMaxViewers, ct));
+    }
+
+    public async Task WatchAsync(string code, CancellationToken ct)
+    {
+        var runtime = TryGetRuntime();
+        if (runtime is null) return;
+        await GuardAsync(() => runtime.StartWatchingAsync(code, ct));
+    }
+
+    public async Task StopAsync(CancellationToken ct)
+    {
+        var runtime = _composition?.Runtime;
+        if (runtime is null) return;
+        await GuardAsync(() => runtime.StopAsync(ct));
+    }
+
+    private SessionRuntime? TryGetRuntime()
+    {
+        var settings = BackendSettings.TryParse(_backendAddress);
+        if (settings is null)
+        {
+            ShellError = "Set a valid backend address in Settings first.";
+            return null;
+        }
+
+        if (_composition is null)
+        {
+            _composition = new AppComposition(settings);
+            _composition.Runtime.Changed += OnSnapshot;
+            ViewModel.Apply(_composition.Runtime.Snapshot);
+        }
+
+        return _composition.Runtime;
+    }
+
+    private async Task GuardAsync(Func<Task> action)
+    {
+        ShellError = null;
+        try
+        {
+            await action();
+        }
+        catch (Exception e) when (e is HttpRequestException or InvalidOperationException or TaskCanceledException)
+        {
+            // The runtime already reports refusals the backend explained. What is left is the
+            // backend not answering at all, which no session snapshot can describe.
+            ShellError = e.Message;
+        }
+    }
+
+    // Snapshots arrive on whatever thread the signaling receive loop is running on; bindings
+    // and the observable collection are the UI thread's alone.
+    private void OnSnapshot(SessionSnapshot snapshot) => Dispatcher.UIThread.Post(() =>
+    {
+        ViewModel.Apply(snapshot);
+        Diagnostics.Insert(0,
+            $"{DateTimeOffset.Now:HH:mm:ss}  {snapshot.Phase}  signaling={snapshot.Signaling}  " +
+            $"session={snapshot.SessionId?.ToString() ?? "-"}  viewers={snapshot.ViewerCount}");
+    });
+
+    private void Raise([CallerMemberName] string? property = null) =>
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(property));
+}

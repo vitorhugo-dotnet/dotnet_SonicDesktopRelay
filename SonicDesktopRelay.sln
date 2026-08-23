@@ -23,6 +23,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SonicDesktopRelay.Presentat
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SonicDesktopRelay.Presentation.Tests", "tests\SonicDesktopRelay.Presentation.Tests\SonicDesktopRelay.Presentation.Tests.csproj", "{A4A8D763-20F4-4853-951C-E2C047389EBF}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SonicDesktopRelay.App", "src\SonicDesktopRelay.App\SonicDesktopRelay.App.csproj", "{5DCD746C-C8DD-4FA7-A688-05A973CB085B}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -129,6 +131,18 @@ Global
 		{A4A8D763-20F4-4853-951C-E2C047389EBF}.Release|x64.Build.0 = Release|Any CPU
 		{A4A8D763-20F4-4853-951C-E2C047389EBF}.Release|x86.ActiveCfg = Release|Any CPU
 		{A4A8D763-20F4-4853-951C-E2C047389EBF}.Release|x86.Build.0 = Release|Any CPU
+		{5DCD746C-C8DD-4FA7-A688-05A973CB085B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5DCD746C-C8DD-4FA7-A688-05A973CB085B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5DCD746C-C8DD-4FA7-A688-05A973CB085B}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{5DCD746C-C8DD-4FA7-A688-05A973CB085B}.Debug|x64.Build.0 = Debug|Any CPU
+		{5DCD746C-C8DD-4FA7-A688-05A973CB085B}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{5DCD746C-C8DD-4FA7-A688-05A973CB085B}.Debug|x86.Build.0 = Debug|Any CPU
+		{5DCD746C-C8DD-4FA7-A688-05A973CB085B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5DCD746C-C8DD-4FA7-A688-05A973CB085B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5DCD746C-C8DD-4FA7-A688-05A973CB085B}.Release|x64.ActiveCfg = Release|Any CPU
+		{5DCD746C-C8DD-4FA7-A688-05A973CB085B}.Release|x64.Build.0 = Release|Any CPU
+		{5DCD746C-C8DD-4FA7-A688-05A973CB085B}.Release|x86.ActiveCfg = Release|Any CPU
+		{5DCD746C-C8DD-4FA7-A688-05A973CB085B}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -142,5 +156,6 @@ Global
 		{47A1748B-0FB9-4E71-A7BF-BC4263E88B25} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{1207AEAA-D085-46D0-9F1D-505B25688518} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{A4A8D763-20F4-4853-951C-E2C047389EBF} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{5DCD746C-C8DD-4FA7-A688-05A973CB085B} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 EndGlobal
