@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\SonicDesktopRelay.Signaling\SonicDesktopRelay.Signaling.csproj" />
+    <ProjectReference Include="..\..\src\SonicDesktopRelay.Core\SonicDesktopRelay.Core.csproj" />
   </ItemGroup>
 
 </Project>
