@@ -155,7 +155,10 @@ depends on.
 
 Signaling flow, per viewer, over the existing session socket:
 
-1. `session.joined` → `VideoPublisher.AddViewerAsync` creates the peer and sends `webrtc.offer`.
+1. `session.joined` → `VideoPublisher.AddViewerAsync` creates the peer, sends `publisher.ready`,
+   then `webrtc.offer`. That order is what `dotnet_SonicRelay/docs/protocol.md` specifies: the
+   `publisher.ready` frame is how a viewer learns which participant is the publisher, from the
+   server-authenticated `from` rather than from anything a peer claims about itself.
 2. Gathered ICE candidates go out as `webrtc.ice_candidate`.
 3. `webrtc.answer` and inbound `webrtc.ice_candidate` are routed back to that participant's peer.
 4. `session.left` disposes the peer. `participant.disconnected` does **not** — that means
@@ -203,12 +206,13 @@ which is why the viewer side is the simpler half.
 Every frame whose `from` is not the publisher is dropped. A session can hold other viewers, and
 none of them may drive this connection.
 
-**The publishing half of this app never sends `publisher.ready`.** `VideoPublisher` sends
-`webrtc.offer` straight off `session.joined` (see the phase-2 flow above), so a viewer that
-waited for `publisher.ready` would never connect to its own product. The subscriber therefore
-also accepts the authenticated sender of the **first offer** as the publisher. `publisher.ready`
-still works, and is still preferred when a publisher sends it; the offer is the fallback that
-makes the two halves of this codebase meet.
+The subscriber also accepts the authenticated sender of the **first offer** as the publisher,
+when no `publisher.ready` has arrived. That tolerance exists because phase 2 originally shipped
+a publisher that skipped `publisher.ready` and offered straight off `session.joined` — a viewer
+built strictly to the documented handshake would have ignored every offer this app's own
+publisher sent, while every unit test on both sides passed. The publisher was fixed to send it;
+the fallback stays, because a contract you can only satisfy by reading the other half's source
+is not a contract, and some future publisher will get this wrong again.
 
 `SipSorceryViewerPeerConnection` holds a single **`recvonly`** H.264 track (payload type 96,
 `packetization-mode=1`) and takes frames from `OnVideoFrameReceived` — SIPSorcery reassembles

@@ -19,9 +19,13 @@ public sealed class VideoPublisherTests
         await harness.Publisher.AddViewerAsync(ViewerA, CancellationToken.None);
 
         Assert.Equal(1, harness.Publisher.PeerCount);
-        var sent = Assert.Single(harness.Signaling.Sent);
-        Assert.Equal(SignalingMessageTypes.WebRtcOffer, sent.Type);
-        Assert.Equal(ViewerA, sent.To);
+        // publisher.ready then webrtc.offer, in that order: the handshake
+        // dotnet_SonicRelay/docs/protocol.md documents. A viewer written against those docs
+        // learns who the publisher is from the first frame and would never answer without it.
+        Assert.Equal(
+            [SignalingMessageTypes.PublisherReady, SignalingMessageTypes.WebRtcOffer],
+            harness.Signaling.Sent.Select(x => x.Type).ToArray());
+        Assert.All(harness.Signaling.Sent, sent => Assert.Equal(ViewerA, sent.To));
     }
 
     [Fact]

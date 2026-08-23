@@ -47,6 +47,13 @@ public sealed class VideoPublisher(
 
         EnsureSubscribed();
 
+        // publisher.ready first, then the offer — the order dotnet_SonicRelay/docs/protocol.md
+        // specifies. It is how a viewer learns which participant is the publisher, from the
+        // server-authenticated `from` rather than from anything a peer claims about itself.
+        // Skipping it happens to work with our own viewer, which also accepts the first offer,
+        // but it would silently break any client written against the documented contract.
+        await signaling.SendAsync(SignalingMessageTypes.PublisherReady, participantId, new { }, ct);
+
         var offer = await peer.CreateOfferAsync(ct);
         await signaling.SendAsync(SignalingMessageTypes.WebRtcOffer, participantId,
             new { type = "offer", sdp = offer }, ct);
