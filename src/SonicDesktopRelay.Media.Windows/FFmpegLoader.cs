@@ -47,10 +47,16 @@ public static class FFmpegLoader
             var directory = FindLibraryDirectory(searched);
             if (directory is null)
             {
+                // A release build carries these beside the executable, so reaching this point
+                // means either a source build without the bundled runtime or a stripped
+                // install directory — the message has to distinguish the two for the user.
                 _error =
                     $"FFmpeg 8.1 shared libraries ({string.Join(", ", RequiredLibraries)}) were not found. "
-                    + $"Searched: {string.Join("; ", searched)}. "
-                    + $"Set {OverrideVariable} to the folder holding them.";
+                    + "A packaged build ships them beside the executable; if this is one, the "
+                    + "installation is incomplete and reinstalling restores it. "
+                    + $"Otherwise install a shared FFmpeg 8.1 build, or set {OverrideVariable} "
+                    + "to the folder holding them. "
+                    + $"Searched: {string.Join("; ", searched)}.";
                 error = _error;
                 return false;
             }
@@ -58,7 +64,13 @@ public static class FFmpegLoader
             try
             {
                 ffmpeg.RootPath = directory;
-                SIPSorceryMedia.FFmpeg.FFmpegInit.Initialise(libPath: directory);
+
+                // Every ffmpeg.* call goes through a table of delegates that stays null until
+                // this runs, so skipping it makes the first call a null dereference rather
+                // than anything that names FFmpeg. Resolution itself stays lazy: a function is
+                // bound, and its library loaded, the first time it is actually called.
+                DynamicallyLoadedBindings.ThrowErrorIfFunctionNotFound = true;
+                DynamicallyLoadedBindings.Initialize();
 
                 // Force one real call across the boundary: a wrong ABI shows up here rather
                 // than inside the first encode.
@@ -82,7 +94,9 @@ public static class FFmpegLoader
         foreach (var candidate in Candidates())
         {
             if (string.IsNullOrWhiteSpace(candidate)) continue;
-            searched.Add(candidate);
+            // PATH routinely repeats entries, and the bundled runtime is reachable under more
+            // than one name; reporting the same folder twice only makes the failure harder to read.
+            if (!searched.Contains(candidate, StringComparer.OrdinalIgnoreCase)) searched.Add(candidate);
             if (IsUsable(candidate)) return candidate;
         }
 
@@ -95,16 +109,56 @@ public static class FFmpegLoader
         var overridden = Environment.GetEnvironmentVariable(OverrideVariable);
         if (!string.IsNullOrWhiteSpace(overridden)) yield return overridden;
 
-        // 2. Beside the executable, where the installer puts them.
+        // 2. The runtime the build embedded: beside the app for a normal or portable build.
+        yield return AppContext.BaseDirectory;
+
+        // 3. The same runtime inside a single-file EXE. The host extracts bundled native
+        //    libraries to a temporary folder and names it here; AppContext.BaseDirectory
+        //    still points at the EXE, which is why probing that alone is not enough.
+        foreach (var path in NativeSearchDirectories()) yield return path;
+
+        // 4. Beside a single-file EXE, and the ffmpeg subfolder either layout may use.
+        var processDirectory = ProcessDirectory();
+        if (processDirectory is not null)
+        {
+            yield return processDirectory;
+            yield return Path.Combine(processDirectory, "ffmpeg");
+        }
+
         yield return Path.Combine(AppContext.BaseDirectory, "ffmpeg");
 
-        // 3. The winget shared package.
+        // 5. The winget shared package.
         foreach (var path in WingetCandidates()) yield return path;
 
-        // 4. Anything already on PATH.
+        // 6. Anything already on PATH.
         var pathVariable = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
         foreach (var entry in pathVariable.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
             yield return entry.Trim();
+    }
+
+    /// <summary>
+    /// The directories the .NET host resolves native libraries from. For a single-file
+    /// publish this is the bundle's extraction directory, which is the only place the
+    /// embedded FFmpeg exists on disk.
+    /// </summary>
+    private static IEnumerable<string> NativeSearchDirectories()
+    {
+        if (AppContext.GetData("NATIVE_DLL_SEARCH_DIRECTORIES") is not string directories) yield break;
+
+        foreach (var entry in directories.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+            yield return entry.Trim();
+    }
+
+    private static string? ProcessDirectory()
+    {
+        try
+        {
+            return Path.GetDirectoryName(Environment.ProcessPath);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return null;
+        }
     }
 
     private static IEnumerable<string> WingetCandidates()
