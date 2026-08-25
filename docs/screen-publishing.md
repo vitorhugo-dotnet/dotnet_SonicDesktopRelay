@@ -106,18 +106,61 @@ FFmpeg 8.x SONAMEs. This check is on the file names rather than the folder name 
 FFmpeg 9 ships `avcodec-63.dll`, is ABI-incompatible, and loading it fails later as an opaque
 `DllNotFoundException` or a crash inside native code. **Do not "upgrade" to 9.x.**
 
+### The runtime is bundled
+
+Nobody installs FFmpeg to use SonicDesktopRelay. The build embeds it, and both release assets
+carry it: the portable ZIP has the DLLs beside `SonicDesktopRelay.App.exe`, and the single-file
+EXE has them inside the bundle, extracted by the host on launch.
+
+`build/FFmpeg.props` pins what gets embedded — version, download URL, SHA-256.
+`build/FFmpegAcquisition.targets` fetches it and is imported by `SonicDesktopRelay.Media.Windows`
+alone, so the download has exactly one owner rather than racing two consumers against the same
+cache file; both consumers reference that project, so it has already run by the time they build.
+`build/FFmpeg.targets` then ships what was fetched, imported by `SonicDesktopRelay.App` and by
+`SonicDesktopRelay.Media.Windows.Tests`. Together they:
+
+1. Download `ffmpeg-8.1.1-full_build-shared.zip` once into `artifacts/ffmpeg/` (git-ignored,
+   cached by CI on the contents of `FFmpeg.props`).
+2. Fail the build if its SHA-256 is not the pinned one, deleting the bad archive so the next
+   build re-fetches rather than re-failing.
+3. Unpack only `avcodec-62.dll`, `avutil-60.dll`, `swresample-6.dll` and `swscale-9.dll`.
+   avfilter alone is 109 MB and nothing here builds a filter graph; avdevice enumerates capture
+   devices, which this app does through Windows.Graphics.Capture instead. swresample is in the
+   list only because `avcodec-62.dll` imports it.
+4. Copy them beside the build output, and add them to the publish list as `AssetType=native` so
+   `IncludeNativeLibrariesForSelfExtract` pulls them into the single-file EXE.
+
+Two build-time knobs:
+
+| Property | Effect |
+|---|---|
+| `-p:EmbedFFmpegRuntime=false` | Embed nothing; the app falls back to a system install, as it did before. |
+| `-p:FFmpegRuntimeDirectory=<folder>` | Embed the libraries from an existing shared build instead of downloading — for an offline agent, or to ship an LGPL build. |
+
+The bundled build is GPL v3. [THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md) covers what
+that means for redistribution and what the alternatives cost.
+
+### The search order
+
 `FFmpegLoader` searches, in order:
 
 1. `SONICDESKTOPRELAY_FFMPEG_PATH` — the escape hatch for a non-standard install.
-2. An `ffmpeg` folder beside the executable — where the installer will put them.
-3. `%LOCALAPPDATA%\Microsoft\WinGet\Packages\Gyan.FFmpeg.Shared_*\ffmpeg-*-full_build-shared\bin`.
-4. Every entry on `PATH`.
+2. `AppContext.BaseDirectory` — the embedded runtime, in a normal or portable build.
+3. Every directory in `NATIVE_DLL_SEARCH_DIRECTORIES` — the embedded runtime again, this time
+   in a single-file EXE. The host extracts bundled native libraries to a temporary folder and
+   names it there; `AppContext.BaseDirectory` still points at the EXE, so probing that alone
+   would miss it.
+4. The directory holding the running executable, and an `ffmpeg` folder inside either it or
+   `AppContext.BaseDirectory`.
+5. `%LOCALAPPDATA%\Microsoft\WinGet\Packages\Gyan.FFmpeg.Shared_*\ffmpeg-*-full_build-shared\bin`.
+6. Every entry on `PATH`.
 
-It is idempotent and thread-safe, and returns `false` with a human-readable reason rather than
-throwing: "no FFmpeg" is a supported state. The app still runs, it just cannot share, and
-Diagnostics has to be able to say why.
+Steps 2 to 4 are the shipped runtime; 5 and 6 are what a source build or an
+`EmbedFFmpegRuntime=false` build lands on. It is idempotent and thread-safe, and returns
+`false` with a human-readable reason rather than throwing: "no FFmpeg" is still a supported
+state. The app runs, it just cannot share, and Diagnostics has to be able to say why.
 
-To install the expected build:
+To install a system-wide build for an `EmbedFFmpegRuntime=false` build:
 
 ```powershell
 winget install Gyan.FFmpeg.Shared

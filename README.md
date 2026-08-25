@@ -6,11 +6,21 @@ same encoded stream.
 
 ## Requirements
 
-- Windows 10 build 19041 or later.
+To run a release:
+
+- Windows 10 build 19041 or later. Nothing else — **FFmpeg is bundled**, so there is no separate
+  download and no `winget install` step.
+
+To build from source:
+
 - .NET 10 SDK.
-- **FFmpeg 8.1, shared build** for encoding and decoding — `winget install Gyan.FFmpeg.Shared`. Version 9.x is
-  ABI-incompatible and is deliberately rejected. See
+- Network access on the first build: it fetches the pinned FFmpeg 8.1.1 shared build once
+  (about 100 MB, cached under `artifacts/ffmpeg/`) and copies the libraries into every build
+  output. `-p:EmbedFFmpegRuntime=false` skips that and uses a system install instead. See
   [docs/screen-publishing.md](docs/screen-publishing.md#ffmpeg-requirement).
+
+The bundled FFmpeg is GPL v3; see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for what that
+means for redistribution.
 
 ## Build and test
 
@@ -20,8 +30,8 @@ dotnet test SonicDesktopRelay.sln
 dotnet run --project src/SonicDesktopRelay.App
 ```
 
-Tests that need a display or FFmpeg skip themselves when neither is available; everything else
-runs on fakes.
+Tests that need a display skip themselves when there is none; everything else runs on fakes. The
+FFmpeg tests do not skip — the build hands them the same libraries the app ships.
 
 ## Projects
 
@@ -47,3 +57,4 @@ without a GPU.
   selection, the FFmpeg requirement, the quality ladder, and why a stall is not a
   disconnection.
 - [Design spec](docs/superpowers/specs/2026-08-23-sonicdesktoprelay-design.md).
+- [Third-party notices](THIRD-PARTY-NOTICES.md) — the bundled FFmpeg and its licence.

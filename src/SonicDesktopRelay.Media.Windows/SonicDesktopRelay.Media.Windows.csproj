@@ -19,4 +19,8 @@
     <PackageReference Include="Vortice.Direct3D11" Version="3.6.2" />
   </ItemGroup>
 
+  <!-- The single owner of the FFmpeg download: everything that embeds the runtime references
+       this project, so it is acquired once instead of once per consumer. -->
+  <Import Project="..\..\build\FFmpegAcquisition.targets" />
+
 </Project>

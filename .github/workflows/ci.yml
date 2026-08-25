@@ -34,6 +34,14 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      # The FFmpeg shared build the app embeds is around 100 MB. Caching it on the version and
+      # checksum in build/FFmpeg.props means only the first run after a version bump downloads it.
+      - name: Cache the embedded FFmpeg runtime
+        uses: actions/cache@v4
+        with:
+          path: artifacts/ffmpeg
+          key: ffmpeg-${{ runner.os }}-${{ hashFiles('build/FFmpeg.props') }}
+
       - name: Set up .NET
         uses: actions/setup-dotnet@v4
         with:
@@ -176,6 +184,14 @@ jobs:
         with:
           global-json-file: global.json
 
+      # The FFmpeg shared build the app embeds is around 100 MB. Caching it on the version and
+      # checksum in build/FFmpeg.props means only the first run after a version bump downloads it.
+      - name: Cache the embedded FFmpeg runtime
+        uses: actions/cache@v4
+        with:
+          path: artifacts/ffmpeg
+          key: ffmpeg-${{ runner.os }}-${{ hashFiles('build/FFmpeg.props') }}
+
       - name: Resolve package metadata
         id: metadata
         shell: pwsh
@@ -294,6 +310,8 @@ jobs:
 
           Notes:
           - Windows only. The app registers itself on first run; there is no sign-in.
+          - FFmpeg 8.1.1 shared libraries are bundled in both assets; nothing has to be
+            installed separately. They are GPLv3 — see THIRD-PARTY-NOTICES.md.
           - An installer is not built yet; both assets are portable and per-user.
           - Packages are currently unsigned.
           "@ | Set-Content -Path (Join-Path $distDir 'RELEASE-NOTES.md') -Encoding UTF8

@@ -47,6 +47,14 @@ jobs:
           # When a PR number is supplied, build that PR's head; otherwise the selected ref.
           ref: ${{ github.event.inputs.pr_number && format('refs/pull/{0}/head', github.event.inputs.pr_number) || '' }}
 
+      # The FFmpeg shared build the app embeds is around 100 MB. Caching it on the version and
+      # checksum in build/FFmpeg.props means only the first run after a version bump downloads it.
+      - name: Cache the embedded FFmpeg runtime
+        uses: actions/cache@v4
+        with:
+          path: artifacts/ffmpeg
+          key: ffmpeg-${{ runner.os }}-${{ hashFiles('build/FFmpeg.props') }}
+
       - name: Set up .NET
         uses: actions/setup-dotnet@v4
         with:
@@ -203,7 +211,7 @@ jobs:
           $extraArgs += @(
             '--generate-notes'
             '--notes'
-            "Build version: $version`nCommit: $targetSha`nRuntime: $env:RUNTIME_ID"
+            "Build version: $version`nCommit: $targetSha`nRuntime: $env:RUNTIME_ID`nFFmpeg 8.1.1 shared libraries are bundled in both assets (GPLv3, see THIRD-PARTY-NOTICES.md)."
           )
 
           $assets = @(
