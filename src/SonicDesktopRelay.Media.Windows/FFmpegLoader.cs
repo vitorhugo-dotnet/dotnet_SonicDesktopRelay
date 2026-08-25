@@ -64,7 +64,13 @@ public static class FFmpegLoader
             try
             {
                 ffmpeg.RootPath = directory;
-                SIPSorceryMedia.FFmpeg.FFmpegInit.Initialise(libPath: directory);
+
+                // Every ffmpeg.* call goes through a table of delegates that stays null until
+                // this runs, so skipping it makes the first call a null dereference rather
+                // than anything that names FFmpeg. Resolution itself stays lazy: a function is
+                // bound, and its library loaded, the first time it is actually called.
+                DynamicallyLoadedBindings.ThrowErrorIfFunctionNotFound = true;
+                DynamicallyLoadedBindings.Initialize();
 
                 // Force one real call across the boundary: a wrong ABI shows up here rather
                 // than inside the first encode.

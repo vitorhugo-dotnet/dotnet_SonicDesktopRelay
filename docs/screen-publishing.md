@@ -98,8 +98,17 @@ always even: H.264 4:2:0 chroma subsampling cannot represent odd ones.
 
 ## FFmpeg requirement
 
-**FFmpeg 8.1, shared build.** `SIPSorceryMedia.FFmpeg` 10.0.16 binds to the FFmpeg 8.1 ABI
-through `FFmpeg.AutoGen` 8.1.0.
+**FFmpeg 8.1, shared build.** `FFmpeg.AutoGen` 8.1.0 binds to the FFmpeg 8.1 ABI.
+
+Those bindings are used directly rather than through `SIPSorceryMedia.FFmpeg`, which used to
+wrap them here. Its initialiser registers capture devices, and that one call pulls in avdevice,
+avfilter and avformat — 130 MB of libraries for a path this app never takes, since it captures
+through Windows.Graphics.Capture and encodes through avcodec. `FFmpegLoader` does the two things
+that were actually wanted from it: set `ffmpeg.RootPath`, and call
+`DynamicallyLoadedBindings.Initialize()`. That second call is not optional — every `ffmpeg.*`
+function is a delegate that stays null until it runs, so omitting it turns the first FFmpeg call
+into a null dereference. Binding stays lazy afterwards: a function is resolved, and its library
+loaded, the first time it is called, which is why shipping a subset of the libraries works.
 
 A directory is accepted only if it contains **`avcodec-62.dll` and `avutil-60.dll`** — the
 FFmpeg 8.x SONAMEs. This check is on the file names rather than the folder name on purpose:
@@ -124,9 +133,10 @@ cache file; both consumers reference that project, so it has already run by the 
 2. Fail the build if its SHA-256 is not the pinned one, deleting the bad archive so the next
    build re-fetches rather than re-failing.
 3. Unpack only `avcodec-62.dll`, `avutil-60.dll`, `swresample-6.dll` and `swscale-9.dll`.
-   avfilter alone is 109 MB and nothing here builds a filter graph; avdevice enumerates capture
-   devices, which this app does through Windows.Graphics.Capture instead. swresample is in the
-   list only because `avcodec-62.dll` imports it.
+   That set is closed under `FFmpeg.AutoGen`'s dependency map for everything this app calls:
+   avcodec needs avutil and swresample, swscale needs avutil. avfilter alone is 109 MB and
+   nothing here builds a filter graph; avdevice enumerates capture devices, which this app does
+   through Windows.Graphics.Capture instead.
 4. Copy them beside the build output, and add them to the publish list as `AssetType=native` so
    `IncludeNativeLibrariesForSelfExtract` pulls them into the single-file EXE.
 
