@@ -271,6 +271,32 @@ jobs:
             -p:DebugType=embedded `
             -o $singleFileDir
 
+      # The whole point of embedding FFmpeg is that neither asset needs anything installed, and
+      # the single-file path is the fragile half: content is only bundled because the libraries
+      # are marked AssetType=native. A regression there is invisible until a user's media fails
+      # to start, so it fails the build here instead.
+      - name: Verify FFmpeg is embedded in both assets
+        shell: pwsh
+        run: |
+          $libraries = @('avcodec-62.dll', 'avutil-60.dll', 'swresample-6.dll', 'swscale-9.dll')
+          $portableDir = Join-Path $env:GITHUB_WORKSPACE 'artifacts/publish/portable'
+          $exePath = Join-Path $env:GITHUB_WORKSPACE "artifacts/publish/single-file/$env:APP_EXE_NAME"
+
+          $missing = $libraries | Where-Object { -not (Test-Path (Join-Path $portableDir $_)) }
+          if ($missing) {
+            throw "The portable publish output is missing $($missing -join ', '). Check build/FFmpeg.targets."
+          }
+
+          # Bundled entry names are stored uncompressed in the single-file manifest, so the
+          # library names are readable in the EXE even with EnableCompressionInSingleFile.
+          $bundle = [System.Text.Encoding]::Latin1.GetString([System.IO.File]::ReadAllBytes($exePath))
+          $unbundled = $libraries | Where-Object { $bundle.IndexOf($_, [StringComparison]::Ordinal) -lt 0 }
+          if ($unbundled) {
+            throw "The single-file EXE does not bundle $($unbundled -join ', '). IncludeNativeLibrariesForSelfExtract only picks up items marked AssetType=native."
+          }
+
+          Write-Host "Both assets carry $($libraries -join ', ')."
+
       # No MSI or setup bundle yet: packaging/*.wxs arrives with phase 4 of the design
       # (docs/superpowers/specs/2026-08-23-sonicdesktoprelay-design.md). When it does, add a
       # WiX step here pinned to v5 — v6+ requires accepting the Open Source Maintenance Fee
